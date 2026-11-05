@@ -266,12 +266,20 @@ class Market:
         return self.store.prices(series, self.start.isoformat())
 
     def quote(self, symbol: str) -> Quote | None:
+        """Live quote; if the provider fails (e.g. rate limit), the last cached daily close is used
+        instead and the fallback is noted."""
         if symbol not in self._quotes:
             try:
                 self._quotes[symbol] = self.provider.quote(symbol)
             except DataError as e:
-                self.errors.append(str(e))
-                self._quotes[symbol] = None
+                h = self.store.prices(f"{self.provider.name}:{symbol}")
+                if h:
+                    prev = h[-2][1] if len(h) > 1 else None
+                    self._quotes[symbol] = Quote(symbol, h[-1][1], h[-1][0] + "T00:00:00+00:00", prev)
+                    self.errors.append(f"{e}; used last close of {h[-1][0]} for {symbol}")
+                else:
+                    self.errors.append(str(e))
+                    self._quotes[symbol] = None
         return self._quotes[symbol]
 
     def daily_with_quote(self, symbol: str) -> Series:

@@ -92,3 +92,28 @@ class RSAndSeasonTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QuoteFallbackTests(unittest.TestCase):
+    def test_failed_quote_falls_back_to_last_cached_close(self):
+        import tempfile
+        from pathlib import Path
+
+        from boersen_agent.marketdata import DataError, Market, Provider
+        from boersen_agent.store import Store
+
+        class Down(Provider):
+            name = "down"
+
+            def quote(self, symbol):
+                raise DataError("HTTP 429")
+
+        with tempfile.TemporaryDirectory() as d:
+            st = Store(Path(d) / "a.db")
+            st.save_prices("down:ABC", [("2026-11-03", 10.0), ("2026-11-04", 11.0)], "2026-11-05")
+            m = Market(st, Down(), today=date(2026, 11, 5))
+            q = m.quote("ABC")
+            self.assertEqual((q.price, q.previous_close), (11.0, 10.0))
+            self.assertIn("used last close of 2026-11-04", m.errors[0])
+            self.assertIsNone(m.quote("XYZ"))
+            st.close()

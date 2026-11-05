@@ -13,9 +13,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.dates as mdates  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.patches import Patch  # noqa: E402
 from matplotlib.ticker import FuncFormatter  # noqa: E402
 
 from . import rules as R  # noqa: E402
+from .names import nice_name  # noqa: E402
 
 SURFACE, INK, INK2, MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#898781"
 GRID, AXIS = "#e1e0d9", "#c3c2b7"
@@ -59,6 +61,7 @@ def _save(fig, path: Path) -> Path:
 
 
 def _short(name: str, n: int = 28) -> str:
+    name = nice_name(name)
     return name if len(name) <= n else name[: n - 1] + "…"
 
 
@@ -83,9 +86,7 @@ def allocation(rows: list[dict], path: Path) -> Path | None:
     ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: _eur(v)))
     _axes(ax, "x")
     used = sorted({group.get(r.get("asset") or ("cash" if r.get("cash") else "stock"), 0) for r in data})
-    for g in used:
-        ax.barh([], [], color=SERIES[g], label=names[g])
-    ax.legend(loc="lower right", fontsize=7.5)
+    ax.legend(handles=[Patch(facecolor=SERIES[g], label=names[g]) for g in used], loc="lower right", fontsize=7.5)
     return _save(fig, path)
 
 

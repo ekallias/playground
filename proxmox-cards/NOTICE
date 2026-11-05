@@ -1,0 +1,7 @@
+Proxmox Cards for Home Assistant (proxmox-extra-cards)
+
+proxmox-vm-card in this project is an independent rewrite of the VM card from
+"Proxmox Cards for Home Assistant" by chsegala
+(https://github.com/chsegala/proxmox-cards-for-home-assistant), licensed under the
+Apache License, Version 2.0. It reimplements that card's configuration schema and
+behaviour; no source code was copied. See http://www.apache.org/licenses/LICENSE-2.0

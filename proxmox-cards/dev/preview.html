@@ -1,0 +1,172 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Proxmox Extra Cards preview</title>
+<style>
+  body { margin:0; padding:24px; font-family: Roboto, "Segoe UI", system-ui, sans-serif; background: var(--bg);
+    --bg:#f2f4f7; --ha-card-background:#fff; --primary-text-color:#1c2530; --secondary-text-color:#69737f; --divider-color:#e4e8ee;
+    --primary-color:#03a9f4; --success-color:#43a047; --warning-color:#ffa600; --error-color:#db4437; color: var(--primary-text-color); }
+  body.dark { --bg:#111418; --ha-card-background:#1c1f24; --primary-text-color:#e3e6ea; --secondary-text-color:#9aa3ad; --divider-color:#2d3238; }
+  ha-card { display:block; background: var(--ha-card-background); border-radius:12px; box-shadow: 0 1px 2px rgba(0,0,0,.08); border:1px solid var(--divider-color); }
+  .grid { display:grid; grid-template-columns: repeat(4, 380px); width: 1568px; gap:16px; align-items:start; }
+  .ovrow { display:grid; grid-template-columns: 1160px 380px; gap:16px; align-items:start; margin-bottom: 24px; }
+  .col { display:flex; flex-direction:column; gap:16px; }
+  h4 { margin: 0 0 6px; font: 600 11px/1 sans-serif; letter-spacing:.08em; text-transform:uppercase; color: var(--secondary-text-color); }
+</style></head>
+<body>
+<div class="ovrow">
+  <div><h4>Overview · wide (read-only default)</h4><proxmox-overview-card id="o1"></proxmox-overview-card></div>
+  <div><h4>Overview · phone width, controls on</h4><proxmox-overview-card id="o2"></proxmox-overview-card></div>
+</div>
+<div class="grid">
+  <div class="col">
+    <div><h4>VM · standard</h4><proxmox-vm-card id="v1"></proxmox-vm-card></div>
+    <div><h4>VM · compact</h4><proxmox-vm-card id="v2"></proxmox-vm-card></div>
+    <div><h4>VM · suspended</h4><proxmox-vm-card id="v4"></proxmox-vm-card></div>
+    <div><h4>VM · original README config</h4><proxmox-vm-card id="v5"></proxmox-vm-card></div>
+  </div>
+  <div class="col">
+    <div><h4>VM · detailed</h4><proxmox-vm-card id="v3"></proxmox-vm-card></div>
+    <div><h4>Container · running</h4><proxmox-guest-card id="c1"></proxmox-guest-card></div>
+    <div><h4>Container · stopped, compact</h4><proxmox-guest-card id="c2"></proxmox-guest-card></div>
+    <div><h4>Container · default sensors</h4><proxmox-guest-card id="c3"></proxmox-guest-card></div>
+  </div>
+  <div class="col">
+    <div><h4>Host · with Extended Sensors</h4><proxmox-node-card id="n1"></proxmox-node-card></div>
+    <div><h4>Host · official sensors only, detailed</h4><proxmox-node-card id="n2"></proxmox-node-card></div>
+  </div>
+  <div class="col">
+    <div><h4>Guests list</h4><proxmox-guests-card id="l1"></proxmox-guests-card></div>
+    <div><h4>Storage · bars</h4><proxmox-storage-card id="s1"></proxmox-storage-card></div>
+    <div><h4>Storage · rings</h4><proxmox-storage-card id="s2"></proxmox-storage-card></div>
+  </div>
+</div>
+<script>
+  // stub ha-icon with a tiny glyph so the layout is visible outside HA
+  customElements.define("ha-icon", class extends HTMLElement { connectedCallback(){ const m={"mdi:package-variant-closed":"▣","mdi:desktop-tower":"▭","mdi:database":"⛁","mdi:play":"▶","mdi:power":"⏻","mdi:restart":"↻","mdi:stop":"■","mdi:pause":"❚❚"}; this.textContent=m[this.getAttribute("icon")]||"•"; this.style.cssText="display:inline-flex;font-size:var(--mdc-icon-size,20px);line-height:1;width:var(--mdc-icon-size,20px);justify-content:center"; } });
+  customElements.define("ha-card", class extends HTMLElement {});
+  const E="01ENTRY";
+  const devices=[], entities=[], states={};
+  const node={id:"n1", name:"pve", identifiers:[["proxmoxve",`${E}_node_node/pve`]], model:"Node"};
+  devices.push(node);
+  function nodeEnt(dom, key, state, attrs = {}, dis = null) {
+    const eid = `${dom}.pve_${key}`;
+    entities.push({ entity_id: eid, device_id: "n1", platform: "proxmoxve", unique_id: `${E}_node/pve_${key}`, disabled_by: dis });
+    if (!dis) states[eid] = { state: String(state), attributes: attrs, last_updated: "x" };
+  }
+  const GiB=1024**3, now=Date.now();
+  function guest(kind, vmid, name, st, d, opts={}) {
+    const id=`${kind}${vmid}`; devices.push({id, name, identifiers:[["proxmoxve",`${E}_${kind}_${vmid}`]], model: kind==="vm"?"VM":"Container", via_device_id:"n1"});
+    const p= kind==="vm"?"vm_":"container_";
+    const add=(dom,key,state,attrs={},dis=null)=>{ const eid=`${dom}.${name.toLowerCase().replace(/\W+/g,"_")}_${key}`; entities.push({entity_id:eid, device_id:id, platform:"proxmoxve", unique_id:`${E}_${vmid}_${key}`, disabled_by:dis}); if(!dis) states[eid]={state:String(state), attributes:attrs, last_updated:"x"}; };
+    const off=opts.defaults?"integration":null;
+    add("sensor",p+"status",st,{device_class:"enum"});
+    add("binary_sensor","status",st==="running"?"on":"off");
+    add("sensor",p+"cpu",d.cpu,{unit_of_measurement:"%"});
+    add("sensor",p+"max_memory",d.maxmem/GiB,{unit_of_measurement:"GiB"});
+    add("sensor",p+"memory_percentage",d.mem/d.maxmem*100,{unit_of_measurement:"%"});
+    add("sensor",p+"memory",d.mem/GiB,{unit_of_measurement:"GiB"},off);
+    add("sensor",p+"disk",d.disk/GiB,{unit_of_measurement:"GiB"},off);
+    add("sensor",p+"max_disk",d.maxdisk/GiB,{unit_of_measurement:"GiB"},off);
+    add("sensor",p+"netin",d.netin/1e9,{unit_of_measurement:"GB"},off);
+    add("sensor",p+"netout",d.netout/1e9,{unit_of_measurement:"GB"},off);
+    add("sensor",p+"uptime",new Date(now-d.up*1000).toISOString(),{device_class:"uptime"});
+    for (const b of (kind==="vm"?["start","stop","restart","shutdown","pause","resume"]:["start","stop","restart"])) add("button",b,"unknown");
+  }
+  guest("container",105,"pihole","running",{cpu:3.2,mem:0.31*GiB,maxmem:0.5*GiB,disk:2.1*GiB,maxdisk:8*GiB,netin:12.4e9,netout:3.1e9,up:9*86400+5*3600});
+  guest("container",110,"jellyfin","running",{cpu:47,mem:3.4*GiB,maxmem:4*GiB,disk:27*GiB,maxdisk:32*GiB,netin:4.2e9,netout:88e9,up:2*86400});
+  guest("container",112,"paperless","stopped",{cpu:0,mem:0,maxmem:2*GiB,disk:9*GiB,maxdisk:16*GiB,netin:0,netout:0,up:0});
+  guest("container",120,"nginx-proxy","running",{cpu:1.1,mem:0.12*GiB,maxmem:0.5*GiB,disk:1.2*GiB,maxdisk:4*GiB,netin:30e9,netout:31e9,up:3*3600},{defaults:true});
+  guest("vm",100,"homeassistant","running",{cpu:12,mem:2.6*GiB,maxmem:4*GiB,disk:0,maxdisk:32*GiB,netin:6.2e9,netout:1.8e9,up:20*86400});
+  guest("vm",102,"build-worker","suspended",{cpu:0,mem:6*GiB,maxmem:8*GiB,disk:0,maxdisk:64*GiB,netin:1e9,netout:1e9,up:3600});
+  guest("vm",101,"windows-11","stopped",{cpu:0,mem:0,maxmem:8*GiB,disk:0,maxdisk:64*GiB,netin:0,netout:0,up:0});
+  function storage(name, used, total, extra={}) {
+    const id="st_"+name; devices.push({id, name:`Storage (${name})`, name_by_user:null, identifiers:[["proxmoxve",`${E}_storage_${name}`]], model:"Storage", via_device_id:"n1"});
+    const add=(dom,key,state,attrs={})=>{ const eid=`${dom}.storage_${name.replace(/\W/g,"_")}_${key}`; entities.push({entity_id:eid, device_id:id, platform:"proxmoxve", unique_id:`${E}_pve_${name}_${key}`, disabled_by:null}); states[eid]={state:String(state),attributes:attrs,last_updated:"x"}; };
+    add("sensor","storage_used",(used/GiB).toFixed(1),{unit_of_measurement:"GiB"});
+    add("sensor","storage_total",(total/GiB).toFixed(1),{unit_of_measurement:"GiB"});
+    add("sensor","storage_available",((total-used)/GiB).toFixed(1),{unit_of_measurement:"GiB"});
+    add("sensor","storage_used_percentage",(used/total*100).toFixed(1),{unit_of_measurement:"%"});
+    add("binary_sensor","storage_active",extra.inactive?"off":"on");
+    add("binary_sensor","storage_enabled","on");
+    add("binary_sensor","storage_shared",extra.shared?"on":"off");
+  }
+  nodeEnt("sensor", "node_cpu", 18.4, { unit_of_measurement: "%" });
+  nodeEnt("sensor", "node_max_cpu", 16);
+  nodeEnt("sensor", "node_memory", 41.2, { unit_of_measurement: "GiB" });
+  nodeEnt("sensor", "node_max_memory", 64, { unit_of_measurement: "GiB" });
+  nodeEnt("sensor", "node_memory_percentage", 64.4, { unit_of_measurement: "%" });
+  nodeEnt("sensor", "node_disk", 38.5, { unit_of_measurement: "GiB" });
+  nodeEnt("sensor", "node_max_disk", 94, { unit_of_measurement: "GiB" });
+  nodeEnt("sensor", "node_uptime", new Date(now - 41 * 86400e3 - 6 * 3600e3).toISOString(), { device_class: "uptime" });
+  nodeEnt("sensor", "node_status", "online", { device_class: "enum" });
+  nodeEnt("binary_sensor", "status", "on");
+  nodeEnt("sensor", "node_backup_last_backup", new Date(now - 7.5 * 3600e3).toISOString(), { device_class: "timestamp" });
+  nodeEnt("sensor", "node_backup_duration", 734, { unit_of_measurement: "s" });
+  nodeEnt("binary_sensor", "node_backup_status", "off");
+  for (const b of ["reboot", "shutdown", "start_all", "stop_all", "suspend_all"]) nodeEnt("button", b, "unknown");
+  // sensors as Proxmox Extended Sensors would provide them (not in the proxmoxve registry)
+  Object.assign(states, {
+    "sensor.pve_cpu_temperature": { state: "71", attributes: { unit_of_measurement: "°C" }, last_updated: "x" },
+    "sensor.pve_load_1m": { state: "2.31", attributes: {}, last_updated: "x" },
+    "sensor.pve_iowait": { state: "1.8", attributes: { unit_of_measurement: "%" }, last_updated: "x" },
+    "sensor.pve_swap_usage": { state: "12", attributes: { unit_of_measurement: "%" }, last_updated: "x" },
+    "sensor.pve_updates": { state: "7", attributes: {}, last_updated: "x" },
+    "sensor.pve_network_rx": { state: "2240", attributes: { unit_of_measurement: "KiB/s" }, last_updated: "x" },
+    "sensor.pve_network_tx": { state: "860", attributes: { unit_of_measurement: "KiB/s" }, last_updated: "x" },
+  });
+  storage("local",21*GiB,94*GiB);
+  storage("local-lvm",640*GiB,832*GiB);
+  storage("tank",7.4*1024*GiB,7.9*1024*GiB);
+  storage("nas-backup",2.1*1024*GiB,5.4*1024*GiB,{shared:true});
+  storage("usb-archive",0,0,{inactive:true});
+  // fake throughput sensors (as a Derivative helper would provide) for the homeassistant VM
+  states["sensor.homeassistant_rx_rate"] = { state: "1.42", attributes: { unit_of_measurement: "MB/s" }, last_updated: "x" };
+  states["sensor.homeassistant_tx_rate"] = { state: "0.31", attributes: { unit_of_measurement: "MB/s" }, last_updated: "x" };
+  // fake 5-minute recorder statistics: a seeded walk ending at each sensor's current value (bytes / B/s, like HA's unit conversion)
+  const trends = { local:[-0.6,0.15], "local-lvm":[2.5,0.3], tank:[3.1,0.25] };
+  const UNIT = { GiB: 1024**3, MiB: 1024**2, GB: 1e9, "MB/s": 1e6, "kB/s": 1e3, "KiB/s": 1024 };
+  function stats(m) {
+    const out = {}; const start = Date.parse(m.start_time); const step = m.period === "hour" ? 3600000 : 300000;
+    const n = Math.floor((Date.now() - start) / step);
+    for (const id of m.statistic_ids) {
+      const st = states[id]; if (!st) continue;
+      const end = Number(st.state) * (UNIT[st.attributes.unit_of_measurement] || 1);
+      let seed = [...id].reduce((a, c) => a + c.charCodeAt(0), 0); const rnd = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
+      const store = Object.keys(trends).find(k => id === `sensor.storage_${k.replace(/\W/g,"_")}_storage_used_percentage`);
+      const rows = []; let walk = 0;
+      for (let i = 0; i < n; i++) {
+        const f = i / n, day = Math.sin((start + i * step) / 86400000 * 2 * Math.PI - 1.2);
+        let v;
+        if (store) { walk += (rnd() - .5) * trends[store][1]; v = end - trends[store][0] * (1 - f) + walk * .3; }
+        else if (id === "sensor.storage_nas_backup_storage_used_percentage") v = (f < .55 ? end + 6 : end) + (rnd() - .5) * .2;
+        else if (/_cpu$/.test(id)) v = Math.max(0.3, end * (0.6 + 0.8 * rnd()) + (day > 0 ? day * end * 1.5 : 0) + (rnd() > .97 ? 25 * rnd() : 0));
+        else if (/memory/.test(id)) { walk += (rnd() - .5) * .02; v = end * (0.9 + 0.1 * f + walk * .2); }
+        else if (/_rate$|network_(rx|tx)$/.test(id)) v = Math.max(0, end * (0.25 + 0.6 * Math.max(0, day) + 0.5 * rnd()) + (rnd() > .985 ? end * 6 * rnd() : 0));
+        else v = end * (0.98 + 0.02 * f);
+        rows.push({ start: start + i * step, mean: v });
+      }
+      out[id] = rows;
+    }
+    return out;
+  }
+  const hass={ states, user:{is_admin:true}, callWS: async (m)=> m.type==="config/device_registry/list"?devices: m.type==="config/entity_registry/list"?entities: m.type==="recorder/statistics_during_period"?stats(m): m.type==="history/history_during_period"?{}: null, callService: async()=>{} };
+  window.__setup = () => {
+    const cfg = {
+      v1:{device:"vm100", entities:{networkRxRate:"sensor.homeassistant_rx_rate", networkTxRate:"sensor.homeassistant_tx_rate"}}, v2:{device:"vm100", layout:"compact", title:"Home Assistant"}, v3:{device:"vm100", layout:"detailed", entities:{networkRxRate:"sensor.homeassistant_rx_rate", networkTxRate:"sensor.homeassistant_tx_rate"}},
+      v4:{device:"vm102"},
+      v5:{device:"vm100", title:"Development VM", layout:"detailed", icon:"mdi:desktop-tower", state_accent:true, metrics:{network:false},
+          progress_bars:{disk:false}, memory_percentage:true, disk_percentage:true, actions:{suspend:false}, show_action_status:false,
+          confirm:["shutdown","reboot","force-stop","suspend"], tap_action:{action:"more-info"},
+          hold_action:{action:"navigate", navigation_path:"/my-dashboard/vms"}, double_tap_action:{action:"none"}},
+      c1:{device:"container105", graphs:{disk:true}}, c2:{device:"container112", layout:"compact"}, c3:{device:"container120", title:"Nginx Proxy Manager"},
+      n1:{device:"n1", entities:{temperature:"sensor.pve_cpu_temperature", load:"sensor.pve_load_1m", iowait:"sensor.pve_iowait", swap:"sensor.pve_swap_usage", updates:"sensor.pve_updates", networkRxRate:"sensor.pve_network_rx", networkTxRate:"sensor.pve_network_tx"}},
+      n2:{device:"n1", layout:"detailed", title:"pve"},
+      o1:{host_sensors:{pve:{temperature:"sensor.pve_cpu_temperature"}}},
+      o2:{read_only:false, title:"Homelab"},
+      l1:{sort:"status"}, s1:{}, s2:{layout:"grid", sort:"usage", show_node:false, hide_inactive:true} };
+    for (const [id,c] of Object.entries(cfg)) { const el=document.getElementById(id); el.setConfig({type:"x",...c}); el.hass=hass; }
+  };
+  if (location.search==="?dark") document.body.classList.add("dark");
+</script>
+<script src="../proxmox-extra-cards.js"></script>
+<script>__setup()</script>
+</body></html>

@@ -93,9 +93,9 @@ class PaperlessClientTests(unittest.TestCase):
         self.c = PaperlessClient(self.url, TOKEN)
 
     def test_ping_sends_token_and_hits_api_root(self):
-        self.assertIn("documents", self.c.ping())
+        self.assertIn("results", self.c.ping())
         method, path, _, headers, _ = FakePaperless.seen[-1]
-        self.assertEqual((method, path), ("GET", "/api/"))
+        self.assertEqual((method, path), ("GET", "/api/documents/"))
         self.assertEqual(headers["Authorization"], f"Token {TOKEN}")
 
     def test_bad_token_raises_paperless_error(self):

@@ -95,8 +95,9 @@ class PaperlessClient:
 
     # ------------------------------------------------------------ connectivity
     def ping(self) -> dict[str, Any]:
-        """Return the API root listing; raises PaperlessError if unreachable or unauthorized."""
-        return self._get("")
+        """Check the connection and token with a cheap authenticated call.
+        Raises PaperlessError if the server is unreachable or the token is rejected."""
+        return self._get("documents/", page_size=1)
 
     # --------------------------------------------------------------- documents
     def list_documents(self, page: int = 1, page_size: int = 25, **filters) -> dict[str, Any]:

@@ -17,7 +17,7 @@ def nice_name(name: str | None) -> str:
     s = re.sub(r"\s{2,}", " ", name.strip())
     s = re.sub(r"(?<=[A-Z])\.(?=(REGISTERED|RG\.))", ". ", s)    # 'CORP.REGISTERED' -> 'CORP. REGISTERED'
     s = _TAIL.sub("", s).strip(" ,-")
-    if s.isupper() or sum(c.isupper() for c in s) > 0.7 * sum(c.isalpha() for c in s):
+    if " " in s and (s.isupper() or sum(c.isupper() for c in s) > 0.7 * sum(c.isalpha() for c in s)):
         out = []
         for tok in s.split(" "):
             core = tok.strip(".,()")

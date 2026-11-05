@@ -122,9 +122,9 @@ def price_vs_stop(panels: list[dict], path: Path, weeks: int = 39) -> Path | Non
     panels = [p for p in panels if len(p["weekly"]) > weeks + 4][:6]
     if not panels:
         return None
-    cols = 2 if len(panels) > 1 else 1
+    cols = 3 if len(panels) > 4 else 2 if len(panels) > 1 else 1
     rows_n = (len(panels) + cols - 1) // cols
-    fig, axes = plt.subplots(rows_n, cols, figsize=(7.2, 2.0 * rows_n), squeeze=False)
+    fig, axes = plt.subplots(rows_n, cols, figsize=(7.2, 1.55 * rows_n + 0.2), squeeze=False)
     for ax, p in zip([a for r in axes for a in r], panels):
         wk = p["weekly"]
         closes = [c for _, c in wk]
@@ -136,8 +136,8 @@ def price_vs_stop(panels: list[dict], path: Path, weeks: int = 39) -> Path | Non
         if stop[-1] is not None:
             ax.text(dates[-1], stop[-1], f" stop {stop[-1]:,.2f}", color=MUTED, fontsize=7, va="top")
         ax.text(dates[-1], closes[-1], f" {closes[-1]:,.2f}", color=INK2, fontsize=7, va="bottom")
-        ax.set_title(_short(p["name"], 40), loc="left")
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+        ax.set_title(_short(p["name"], 26 if cols == 3 else 40), loc="left")
+        ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 7] if cols == 3 else [1, 4, 7, 10]))
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
         ax.margins(x=0.12)
         _axes(ax)

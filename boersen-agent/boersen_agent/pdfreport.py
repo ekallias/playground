@@ -238,7 +238,7 @@ def calls_table(suggestions, calls: dict, include_rec=True) -> list:
 
 
 def market_table(ms, dash) -> list:
-    rows = [["Component", "Now", "Newsletter", "Source", "Rule", "Detail"]]
+    rows = [["Component", "Now", "Issue", "Source", "Rule", "Detail"]]
     for c in ms.components.values():
         now = f"<b>{SIGN[c.state]}</b>" + (" <font color='#d03b3b'>⚠</font>" if c.diverges else "")
         rows.append([c.label, Paragraph(now, S["cell"]), SIGN[c.newsletter], c.source, c.marker, c.detail])
@@ -354,7 +354,7 @@ def daily(path: Path, ctx, analysis, ai_error, charts: dict, now) -> Path:
     story += _chart_section("Distance to the 9-month stop", charts.get("stop_distance"),
                             "The newsletter's latest exit point is a weekly close below the 9-month low.")
     story += _chart_section("Price vs. 9-month stop (completed weekly closes)", charts.get("price_vs_stop"))
-    story += h1("Market regime") + tiles(_regime_tiles(ctx.market)) + market_table(ctx.market, ctx.dashboard)
+    story += [KeepTogether(h1("Market regime") + tiles(_regime_tiles(ctx.market)))] + market_table(ctx.market, ctx.dashboard)
     story += [P(DISCLAIMER + " Prices typically delayed ~15 min.", "sub")]
     story += appendix(mine, ctx.notes, analysis)
     return _build(path, f"Börsen-Agent daily brief {now:%Y-%m-%d}", story)
@@ -374,7 +374,7 @@ def issue(path: Path, ctx, analysis, ai_error, charts: dict, changes: list[str],
     g = dash.get("gesamt", {}).get("score")
     story = [band(f"Börsensignale {iss['issue_key']}", f"Newsletter report · issue of {iss['issue_date']}",
                   f"generated<br/>{now:%d.%m.%Y %H:%M}")]
-    story += tiles([("Gesamtsystem (issue)", f"{g[0]}:{g[1]}" if g else "?", "positive" if g and g[0] > g[1] else "negative",
+    story += tiles([("Gesamtsystem", f"{g[0]}:{g[1]}" if g else "?", "positive" if g and g[0] > g[1] else "negative",
                      ("#0a7d0a" if g[0] > g[1] else "#c02f2f") if g else None),
                     ("Model portfolio", f"{depot.get('stocks_pct', '?')}%", f"stocks · {depot.get('cash_pct', '?')}% cash", None),
                     ("Buy", str(recs.count("K")), "K in the Dispo-Liste", "#0a7d0a"),
@@ -408,7 +408,8 @@ def issue(path: Path, ctx, analysis, ai_error, charts: dict, changes: list[str],
     story += _chart_section("Stock list: relative strength vs. KUV", charts.get("rs_kuv"),
                             "Buy candidates sit right of the top-200 line and below the KUV line.")
     story += _chart_section("Your allocation", charts.get("allocation"))
-    story += h1("Market regime, re-checked with live data") + tiles(_regime_tiles(ctx.market)) + market_table(ctx.market, dash)
+    story += [KeepTogether(h1("Market regime, re-checked with live data") + tiles(_regime_tiles(ctx.market)))] \
+        + market_table(ctx.market, dash)
     story += h1("Portfolio") + portfolio_table(ctx.portfolio)
     story += [P(DISCLAIMER, "sub")]
     story += appendix(mine + picks + cands, ctx.notes, analysis)

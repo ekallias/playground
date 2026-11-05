@@ -1,0 +1,9 @@
+[Unit]
+Description=Börsen-Agent daily run
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/boersen-agent
+EnvironmentFile=/etc/boersen-agent.env
+ExecStart=/usr/bin/python3 -m boersen_agent run

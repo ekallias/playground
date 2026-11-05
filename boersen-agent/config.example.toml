@@ -1,0 +1,28 @@
+# Copy to config.toml (git-ignored) and adjust. Secrets come from environment variables only.
+
+[paths]
+data_dir = "data"         # SQLite state, downloaded newsletters, price cache
+reports_dir = "reports"   # Markdown reports
+
+[paperless]
+url_env = "PAPERLESS_URL"       # e.g. http://192.168.1.32:8000 on the home server
+token_env = "PAPERLESS_TOKEN"
+correspondent = "Börsen Signale"
+upload_reports = false          # true: also store each report in Paperless as a text document
+report_tags = []                # Paperless tag ids for uploaded reports, e.g. [12]
+
+[market]
+provider = "yahoo"              # yahoo (free, unofficial) | eodhd (paid) | csv (offline)
+token_env = "EODHD_API_TOKEN"   # only for eodhd
+auto_lookup = true              # map ISINs/names to symbols via the provider's search (marked unverified)
+history_years = 3
+
+# Override provider symbols if needed (defaults in boersen_agent/config.py), e.g. for EODHD:
+# [market.symbols]
+# dow_utility = "DJU.INDX"
+# brent = "BZ.COMM"
+
+[rules]
+# Parameters marked [U] in docs/METHODS.md are best guesses. Override here, e.g.:
+# nasdaq_buy_weeks = 26
+# near_stop_pct = 3.0

@@ -1,0 +1,5 @@
+isin,symbol,name,quantity,avg_price,currency,buy_date
+CH1243598427,SDZ.SW,Sandoz,20,41.50,CHF,2025-12-08
+DE0007037129,RWE.DE,RWE,50,38.20,EUR,2025-11-10
+US0394831020,ADM,Archer-Daniels Midland,15,58.00,USD,2026-03-30
+,CASH,Cash EUR,5000,1,EUR,

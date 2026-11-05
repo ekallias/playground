@@ -1,0 +1,8 @@
+# Runtime state, personal data and copyrighted newsletter files never go into git.
+data/
+reports/
+config.toml
+symbols.csv
+portfolio.csv
+*.db
+__pycache__/

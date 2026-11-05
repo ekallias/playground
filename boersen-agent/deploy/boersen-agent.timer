@@ -1,0 +1,9 @@
+[Unit]
+Description=Run Börsen-Agent on weekdays after the European close (US still open; quotes delayed)
+
+[Timer]
+OnCalendar=Mon..Fri 18:15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

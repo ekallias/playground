@@ -1,0 +1,5 @@
+{
+  "name": "Proxmox Cards (VMs, containers, storage)",
+  "filename": "proxmox-extra-cards.js",
+  "render_readme": true
+}

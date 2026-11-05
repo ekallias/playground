@@ -230,7 +230,10 @@ def calls_table(suggestions, calls: dict, include_rec=True) -> list:
                Paragraph(why, S["cell"])]
         if include_rec:
             rec = {"K": "buy", "H": "hold", "V": "sell"}.get(s.newsletter_rec or "", "–")
-            row.insert(3, Paragraph(f"{rec}<br/><font color='#898781'>{s.verification or ''}</font>", S["cell"]))
+            verdict = (c or {}).get("verdict")
+            vcol = {"confirmed": "#006300", "questionable": "#7a5600", "contradicted": "#a12b2b"}.get(verdict, "#898781")
+            check = f"AI {verdict}" if verdict else (s.verification or "")
+            row.insert(3, Paragraph(f"{rec}<br/><font color='{vcol}'>{check}</font>", S["cell"]))
         rows.append(row)
     widths = ([38 * mm, 20 * mm, 20 * mm, 20 * mm, W - 98 * mm] if include_rec
               else [44 * mm, 20 * mm, 20 * mm, W - 84 * mm])
@@ -383,7 +386,8 @@ def issue(path: Path, ctx, analysis, ai_error, charts: dict, changes: list[str],
     story += ai_block(analysis, ai_error)
     story += h1("Your portfolio against this issue") + (calls_table(mine, calls) if mine else [P("No portfolio imported yet.")])
     story += h1("Newsletter recommendations, checked")
-    story += [P("Newsletter = the issue's buy / hold / sell and the scripts' live check (confirmed · contradicted · unverified).", "small"),
+    story += [P("Newsletter = the issue's buy / hold / sell, with the AI analyst's verdict (confirmed · questionable · "
+                "contradicted), or the scripts' live check when there is no AI analysis.", "small"),
               Spacer(1, 3)]
     story += calls_table(picks, calls) if picks else [P("All of this issue's recommendations are in your portfolio (see above).")]
     if analysis and analysis.data["new_ideas"]:

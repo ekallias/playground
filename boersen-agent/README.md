@@ -22,8 +22,15 @@ Outputs are **PDF reports with charts**: a daily brief, and a detailed report fo
 confidence means strength of evidence, not a probability of gain.**
 
 Python 3.11+, `pip install -r requirements.txt` (anthropic, matplotlib, reportlab), plus
-`pdftotext`/`pdfinfo` (poppler-utils). For running it next to LiteLLM, n8n and Open WebUI, see
-**[docs/HOMESERVER.md](docs/HOMESERVER.md)**.
+`pdftotext`/`pdfinfo` (poppler-utils).
+
+Deployment guides:
+- **[docs/HOMESERVER.md](docs/HOMESERVER.md):** on your own server, next to LiteLLM, n8n and Open
+  WebUI.
+- **[docs/CLAUDE_CLOUD.md](docs/CLAUDE_CLOUD.md):** entirely on Claude, as a scheduled Claude Code
+  session with no API key.
+- **[docs/OTHER_MODELS.md](docs/OTHER_MODELS.md):** Ollama or any OpenAI-compatible model instead of
+  Claude.
 
 ## What it does
 
@@ -143,6 +150,8 @@ commodity symbols in `config.py` match their catalogue.
 ```
 python3 -m boersen_agent run [--json]        # daily job (JSON summary for n8n)
 python3 -m boersen_agent daily               # daily brief only
+python3 -m boersen_agent prepare [--issue K] # hand-off: fact packs for a Claude session / other model
+python3 -m boersen_agent finish              # hand-off: validate analysis.json, render + publish PDFs
 python3 -m boersen_agent ingest              # pull new issues (+ report)
 python3 -m boersen_agent ingest-file X.pdf   # parse a local PDF
 python3 -m boersen_agent report [2026-22]    # rewrite an issue report

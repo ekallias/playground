@@ -31,6 +31,8 @@ history_years = 3
 [ai]
 # The AI analyst (Claude). Credentials: ANTHROPIC_API_KEY (or a LiteLLM virtual key, see docs/HOMESERVER.md).
 enabled = true
+mode = "api"                    # api: call the Claude API | handoff: `prepare` + `finish` around a Claude Code
+                                # session that writes the analysis itself (docs/CLAUDE_CLOUD.md)
 model = "claude-opus-5-5"
 effort_daily = "medium"         # low | medium | high | xhigh | max
 effort_issue = "high"

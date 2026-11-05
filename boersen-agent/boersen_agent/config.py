@@ -61,6 +61,7 @@ class Config:
     symbols: dict[str, str]
     rules: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_RULES))
     ai_enabled: bool = True
+    ai_mode: str = "api"                    # api: call Claude via the API | handoff: prepare/finish for a Claude session
     ai_model: str = "claude-opus-5-5"
     ai_effort_daily: str = "medium"
     ai_effort_issue: str = "high"
@@ -119,6 +120,7 @@ def load(path: str | Path | None) -> Config:
         symbols=symbols,
         rules=rules,
         ai_enabled=bool(ai.get("enabled", True)),
+        ai_mode=ai.get("mode", "api"),
         ai_model=ai.get("model", "claude-opus-5-5"),
         ai_effort_daily=ai.get("effort_daily", "medium"),
         ai_effort_issue=ai.get("effort_issue", "high"),

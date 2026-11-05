@@ -200,3 +200,43 @@ class AgentEndToEnd(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HandoffMode(AgentEndToEnd):
+    """prepare -> (a Claude session writes analysis.json) -> finish, without any API call."""
+
+    def test_prepare_then_finish(self):
+        self.cfg.ai_mode = "handoff"
+        out = self.cfg.data_dir / "handoff"
+        with mock.patch.dict(marketdata.RATE_SOURCES, rates()), \
+             mock.patch.object(agent_mod, "parse_pdf", return_value=issue()):
+            a = Agent(self.cfg, self.store, self.market, self.pl, datetime(2026, 11, 5, 18, 0))
+            man = a.prepare(out)
+            self.assertEqual([t["scope"] for t in man["tasks"]], ["issue", "daily"])
+            self.assertTrue((out / "prompt.md").read_text().startswith("You are the analyst"))
+            self.assertIn("position_calls", json.loads((out / "schema.json").read_text())["properties"])
+            # the "session" answers the daily task only, with one invented key
+            facts = json.loads(Path(man["tasks"][1]["facts"]).read_text())
+            calls = [{"key": p["key"], "action": p["rule_engine"]["action"], "confidence": 64, "rationale": "ok",
+                      "rule_agreement": "agrees", "override_reason": ""} for p in facts["portfolio"]["positions"]]
+            calls.append({"key": "INVENTED", "action": "BUY", "confidence": 99, "rationale": "x",
+                          "rule_agreement": "agrees", "override_reason": ""})
+            Path(man["tasks"][1]["output"]).write_text(json.dumps({
+                "headline": "Session headline", "summary": "s", "position_calls": calls,
+                "market_view": {"stance": "neutral", "confidence": 50, "reasoning": "r"}}))
+            res = Agent(self.cfg, self.store, self.market, self.pl, datetime(2026, 11, 5, 18, 5)).finish(out)
+        self.assertEqual(len(res["reports"]), 2)
+        self.assertTrue(all(Path(p).read_bytes()[:5] == b"%PDF-" for p in res["reports"]))
+        self.assertEqual(res["problems"], ["issue: no analysis file was written"])
+        self.assertEqual(res["headline"], "Session headline")
+        daily = (self.cfg.reports_dir / "2026-11-05_daily-brief.md").read_text()
+        self.assertIn("Session headline", daily)
+        self.assertNotIn("INVENTED", daily)
+        bi = (self.cfg.reports_dir / "2026-22_newsletter-report.md").read_text()
+        self.assertIn("Unavailable: no analysis file was written", bi)
+
+    def test_handoff_mode_never_calls_the_api(self):
+        self.cfg.ai_mode = "handoff"
+        ai = FakeAI()
+        self.run_agent(ai)
+        self.assertEqual(ai.requests, [])

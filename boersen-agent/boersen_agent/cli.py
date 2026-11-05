@@ -33,6 +33,12 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("run", help="daily job: ingest new newsletters (+ report), then the daily brief")
     p.add_argument("--json", action="store_true", help="print a JSON summary (for n8n and other automation)")
     sub.add_parser("daily", help="write the daily brief only")
+    p = sub.add_parser("prepare", help="hand-off mode: ingest, then write fact packs for an outside analyst")
+    p.add_argument("--out", default=None, help="hand-off folder (default: <data_dir>/handoff)")
+    p.add_argument("--issue", default=None, help="also prepare the report for this (already ingested) issue, e.g. 2026-22")
+    p = sub.add_parser("finish", help="hand-off mode: validate the written analyses, render and publish the PDFs")
+    p.add_argument("--out", default=None, help="hand-off folder (default: <data_dir>/handoff)")
+    p.add_argument("--model", default="claude-code-session", help="name of the model that wrote the analyses")
     sub.add_parser("ingest", help="pull new newsletters from Paperless; report on the newest new one")
     p = sub.add_parser("ingest-file", help="parse a local newsletter PDF (no Paperless)")
     p.add_argument("pdf")
@@ -85,6 +91,10 @@ def main(argv: list[str] | None = None) -> int:
                     print(path)
         elif args.cmd == "daily":
             print(agent.daily())
+        elif args.cmd in ("prepare", "finish"):
+            folder = Path(args.out) if args.out else cfg.data_dir / "handoff"
+            res = agent.prepare(folder, args.issue) if args.cmd == "prepare" else agent.finish(folder, args.model)
+            print(json.dumps(res, ensure_ascii=False, indent=1))
         elif args.cmd == "ingest":
             new = agent.ingest()
             print("new issues:", ", ".join(new) or "none")

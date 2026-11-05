@@ -106,6 +106,10 @@ first runs):
 
 The system prompt is cached, so repeated runs pay less for it.
 
+**Local model instead of Claude?** If Ollama runs on the same server, see
+[OTHER_MODELS.md](OTHER_MODELS.md). The agent then uses `prepare` / `tools/handoff_llm.py` /
+`finish` instead of `run`, and nothing leaves your network except market data.
+
 ## 3. Schedule and deliver with n8n
 
 n8n runs in its own container, so the simplest way to start a Docker job is an **SSH node** to

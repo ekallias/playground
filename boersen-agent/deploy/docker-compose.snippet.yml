@@ -1,0 +1,12 @@
+# Add to the compose file that runs LiteLLM / Open WebUI / n8n.
+# The job does not run permanently: n8n (or cron) starts it with
+#   docker compose run --rm boersen-agent            (default command: run --json)
+services:
+  boersen-agent:
+    build: ./boersen-agent              # this folder
+    image: boersen-agent:local
+    profiles: ["jobs"]                  # not started by `docker compose up`
+    env_file: ./boersen-agent.env       # chmod 600; see deploy/boersen-agent.env.example
+    volumes:
+      - ./boersen-agent-data:/data      # config.toml, data/, reports/
+    networks: [default]                 # the network LiteLLM is on, so http://litellm:4000 resolves

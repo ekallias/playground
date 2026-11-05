@@ -2,13 +2,14 @@
 
 [paths]
 data_dir = "data"         # SQLite state, downloaded newsletters, price cache
-reports_dir = "reports"   # Markdown reports
+reports_dir = "reports"   # PDF reports (+ Markdown copies)
+keep_markdown = true
 
 [paperless]
 url_env = "PAPERLESS_URL"       # e.g. http://192.168.1.32:8000 on the home server
 token_env = "PAPERLESS_TOKEN"
 correspondent = "Börsen Signale"
-upload_reports = false          # true: also store each report in Paperless as a text document
+upload_reports = false          # true: also store each PDF report in Paperless
 report_tags = []                # Paperless tag ids for uploaded reports, e.g. [12]
 
 [market]
@@ -26,3 +27,13 @@ history_years = 3
 # Parameters marked [U] in docs/METHODS.md are best guesses. Override here, e.g.:
 # nasdaq_buy_weeks = 26
 # near_stop_pct = 3.0
+
+[ai]
+# The AI analyst (Claude). Credentials: ANTHROPIC_API_KEY (or a LiteLLM virtual key, see docs/HOMESERVER.md).
+enabled = true
+model = "claude-opus-5-5"
+effort_daily = "medium"         # low | medium | high | xhigh | max
+effort_issue = "high"
+max_tokens = 32000
+# base_url = "http://litellm:4000/anthropic"   # route through a LiteLLM gateway (or set ANTHROPIC_BASE_URL)
+server_fallbacks = true         # Anthropic re-runs a declined request on another model; set false if your gateway rejects it

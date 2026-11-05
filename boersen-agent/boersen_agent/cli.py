@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -29,7 +30,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", default="config.toml" if Path("config.toml").exists() else None,
                     help="config file (default: ./config.toml if present)")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("run", help="daily job: ingest new newsletters (+ report), then the daily brief")
+    p = sub.add_parser("run", help="daily job: ingest new newsletters (+ report), then the daily brief")
+    p.add_argument("--json", action="store_true", help="print a JSON summary (for n8n and other automation)")
     sub.add_parser("daily", help="write the daily brief only")
     sub.add_parser("ingest", help="pull new newsletters from Paperless; report on the newest new one")
     p = sub.add_parser("ingest-file", help="parse a local newsletter PDF (no Paperless)")
@@ -66,8 +68,21 @@ def main(argv: list[str] | None = None) -> int:
     cfg, store, agent = build(args)
     try:
         if args.cmd == "run":
-            for path in agent.run():
-                print(path)
+            paths = agent.run()
+            if args.json:
+                last = store.last_analysis() or {}
+                print(json.dumps({
+                    "reports": [str(p) for p in paths],
+                    "issue_report": next((str(p) for p in paths if "newsletter-report" in p.name), None),
+                    "daily_brief": next((str(p) for p in paths if "daily-brief" in p.name), None),
+                    "headline": last.get("headline"),
+                    "alerts": [f"{c['key']}: {c['action']} ({c['confidence']})" for c in last.get("position_calls", [])
+                               if c["action"] in ("SELL", "REDUCE", "WATCH")],
+                    "notes": agent.notes,
+                }, ensure_ascii=False))
+            else:
+                for path in paths:
+                    print(path)
         elif args.cmd == "daily":
             print(agent.daily())
         elif args.cmd == "ingest":

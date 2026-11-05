@@ -1,35 +1,71 @@
 # boersen-agent
 
-A daily, rule-based portfolio assistant built on the methods of the *Börsensignale* newsletter
-(Uwe Lang / Klaus Haidorfer). It reads each new issue from Paperless and re-checks the newsletter's
-signals with market data. It then scores your positions and the newsletter's picks, and writes two
-Markdown reports.
+A daily portfolio assistant built on the methods of the *Börsensignale* newsletter (Uwe Lang /
+Klaus Haidorfer). **Scripts do the repeatable work, an AI analyst (Claude) does the judgment:**
 
-Every suggestion comes from explicit rules (see [docs/METHODS.md](docs/METHODS.md)). Each one carries
-a confidence score and the list of reasons behind it. **It is a decision aid, not investment advice:
-it never trades, and the confidence measures rule agreement, not the chance of a gain.**
+- **Scripts:** pull each issue from Paperless and parse it, fetch market and rate data, evaluate the
+  newsletter's rules ([docs/METHODS.md](docs/METHODS.md)), keep your portfolio, draw the charts,
+  and lay out the PDFs.
+- **Claude** reads the scripts' fact pack (plus the newsletter PDF on issue days). It weighs
+  conflicting signals and makes a call per position, with a confidence and a reason. It also gives
+  a verdict on each newsletter pick, names new ideas, lists risks and asks you questions. It keeps
+  notes between runs.
+- **Guardrails:**
+  - Claude may only talk about securities in the fact pack, and confidences are clamped to 0–100.
+  - Every number in the tables comes from the scripts.
+  - Any call that differs from a stated newsletter rule is highlighted in red. That includes, above
+    all, the 9-month-low sell rule.
+  - Without an API key, or if the call fails, you get the rule-based report with a banner.
 
-Python 3.11+, standard library only, plus `pdftotext`/`pdfinfo` (poppler-utils).
+Outputs are **PDF reports with charts**: a daily brief, and a detailed report for each new issue.
+**It is decision support for your own account, not investment advice: it never trades, and
+confidence means strength of evidence, not a probability of gain.**
+
+Python 3.11+, `pip install -r requirements.txt` (anthropic, matplotlib, reportlab), plus
+`pdftotext`/`pdfinfo` (poppler-utils). For running it next to LiteLLM, n8n and Open WebUI, see
+**[docs/HOMESERVER.md](docs/HOMESERVER.md)**.
 
 ## What it does
 
 | When | What | Output |
 |---|---|---|
 | Every run (daily) | Checks Paperless for new issues of the correspondent "Börsen Signale" | — |
-| New issue (every 2 weeks) | Parses the dashboard (p5), the Dispo-Liste (p8, with ISINs, K/H/V, 9-month stops) and the ~700-stock RS list (p9–15). Re-checks the market signals and the newsletter's picks with live data, and screens the list for new candidates | `reports/<issue>_newsletter-report.md` |
-| Daily | Market regime (Gesamtsystem, Sicherheitssystem, season), then every position: 9-month stop, quarter rule, RS rank, review rules | `reports/<date>_daily-brief.md` |
+| New issue (every 2 weeks) | Parses the dashboard (p5), the Dispo-Liste (p8, with ISINs, K/H/V, 9-month stops) and the ~700-stock RS list (p9–15). Re-checks the market signals and picks with live data, screens for candidates; Claude reads the issue and the facts | `reports/<issue>_newsletter-report.pdf` |
+| Daily | Market regime, then every position: 9-month stop, quarter rule, RS rank, review rules; Claude's calls with confidence | `reports/<date>_daily-brief.pdf` |
+
+Charts:
+- **Daily brief:** allocation, distance to the 9-month stop, price vs. stop per position, and
+  portfolio value over time.
+- **Issue report:** Gesamtsystem per issue, Zinsstruktur (newsletter vs. computed), the stock list
+  as relative strength vs. KUV with your holdings and candidates marked, and allocation.
+
+A Markdown copy of each report is kept as well (`keep_markdown`).
 
 Duplicate uploads of the same issue are detected and skipped. Reports can also be uploaded to
-Paperless as text documents (`upload_reports = true`).
+Paperless (`upload_reports = true`).
+
+### AI analyst
+
+Set `ANTHROPIC_API_KEY`, or route through a LiteLLM gateway with `ANTHROPIC_BASE_URL` (see
+docs/HOMESERVER.md). Defaults are in `[ai]`:
+
+- **Model and effort:** `claude-opus-5-5`; effort `medium` daily, `high` on issue days.
+- **Output:** structured JSON.
+- **Fallbacks:** Anthropic's server-side refusal fallback is on (`server_fallbacks`).
+- **Cost:** about $3–5 a month.
+
+The fact pack sent to Claude contains your positions and values. Set `enabled = false` to keep
+everything local; the reports are then rule-based only.
 
 ## Setup (home server, e.g. the Paperless LXC)
 
 ```bash
-apt install -y poppler-utils python3
+apt install -y poppler-utils python3 python3-pip
 git clone https://github.com/ekallias/playground && cp -r playground/boersen-agent /opt/boersen-agent
 cd /opt/boersen-agent
+pip install -r requirements.txt
 cp config.example.toml config.toml
-cp deploy/boersen-agent.env.example /etc/boersen-agent.env   # put PAPERLESS_URL / PAPERLESS_TOKEN there
+cp deploy/boersen-agent.env.example /etc/boersen-agent.env   # PAPERLESS_URL / _TOKEN, ANTHROPIC_API_KEY
 chmod 600 /etc/boersen-agent.env
 ```
 
@@ -105,7 +141,7 @@ commodity symbols in `config.py` match their catalogue.
 ## Commands
 
 ```
-python3 -m boersen_agent run                 # daily job
+python3 -m boersen_agent run [--json]        # daily job (JSON summary for n8n)
 python3 -m boersen_agent daily               # daily brief only
 python3 -m boersen_agent ingest              # pull new issues (+ report)
 python3 -m boersen_agent ingest-file X.pdf   # parse a local PDF
@@ -117,7 +153,7 @@ python3 -m boersen_agent symbols list|set
 ## Tests and tools
 
 ```bash
-python3 -m unittest discover -s tests -t .           # synthetic data only, no network
+python3 -m unittest discover -s tests -t .           # synthetic data, fake Claude client, no network
 python3 tools/validate_parser.py /path/to/pdfs       # after a newsletter layout change
 python3 tools/calibrate_zins.py data/agent.db        # computed vs. published yield curve
 ```
@@ -134,5 +170,7 @@ python3 tools/calibrate_zins.py data/agent.db        # computed vs. published yi
   are flagged.
 - **The newsletter's model-portfolio quota** (75 → 100 → 50% in 2026) is discretionary and not
   reproduced. The reports show it for context.
+- **The AI analyst has only been exercised with a fake client in tests.** Check its first real
+  reports critically, especially its confidence levels.
 - **No data files are committed.** Newsletter PDFs, the database, reports, your portfolio and
   `config.toml` stay in git-ignored paths.

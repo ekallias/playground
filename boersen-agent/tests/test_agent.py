@@ -1,6 +1,9 @@
 """End-to-end: fake Paperless + CSV prices + synthetic rates -> both reports."""
+import json
 import tempfile
 import unittest
+from contextlib import contextmanager
+from types import SimpleNamespace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest import mock
@@ -79,6 +82,42 @@ def rates():
     }
 
 
+class FakeAI:
+    """Stands in for anthropic.Anthropic(): returns a schema-shaped analysis for the fact pack it gets."""
+
+    def __init__(self):
+        self.requests = []
+        self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self._stream))
+
+    @contextmanager
+    def _stream(self, **kw):
+        self.requests.append(kw)
+        text = kw["messages"][0]["content"][-1]["text"]
+        facts = json.loads(text.split("```json\n", 1)[1].rsplit("\n```", 1)[0])
+
+        def call(p, override=False):
+            act = "HOLD" if override else p["rule_engine"]["action"]
+            return {"key": p["key"], "action": act, "confidence": 140 if override else 61,
+                    "rationale": f"test rationale for {p['name']}",
+                    "rule_agreement": "overrides" if override else "agrees",
+                    "override_reason": "test override" if override else ""}
+
+        pos = facts["portfolio"]["positions"]
+        data = {"headline": "Test headline", "summary": "Test summary.",
+                "market_view": {"stance": "cautious", "confidence": 55, "reasoning": "test"},
+                "position_calls": [call(p, override=p["rule_engine"]["action"] == "SELL") for p in pos]
+                + [{"key": "INVENTED", "action": "BUY", "confidence": 90, "rationale": "x",
+                    "rule_agreement": "agrees", "override_reason": ""}],
+                "newsletter_picks": [dict(call(p), verdict="confirmed") for p in facts.get("newsletter_picks", [])],
+                "new_ideas": [call(p) for p in facts.get("candidates", [])],
+                "risks": ["test risk"], "questions_for_user": ["test question"], "notes_for_next_run": "watch BSP"}
+        msg = SimpleNamespace(stop_reason="end_turn", model="claude-opus-5-5",
+                              content=[SimpleNamespace(type="text", text=json.dumps(data))],
+                              usage=SimpleNamespace(input_tokens=1000, output_tokens=200,
+                                                    cache_read_input_tokens=0, cache_creation_input_tokens=0))
+        yield SimpleNamespace(get_final_message=lambda: msg)
+
+
 class AgentEndToEnd(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -110,32 +149,53 @@ class AgentEndToEnd(unittest.TestCase):
         self.store.close()
         self.tmp.cleanup()
 
-    def test_run_ingests_once_and_writes_both_reports(self):
+    def run_agent(self, ai=None, hour=18):
         with mock.patch.dict(marketdata.RATE_SOURCES, rates()), \
              mock.patch.object(agent_mod, "parse_pdf", return_value=issue()):
-            a = Agent(self.cfg, self.store, self.market, self.pl, datetime(2026, 11, 5, 18, 0))
-            paths = a.run()
-        self.assertEqual([p.name for p in paths], ["2026-22_newsletter-report.md", "2026-11-05_daily-brief.md"])
+            a = Agent(self.cfg, self.store, self.market, self.pl, datetime(2026, 11, 5, hour, 0), ai_client=ai)
+            return a.run()
+
+    def test_run_ingests_once_and_writes_pdf_reports_with_ai(self):
+        ai = FakeAI()
+        paths = self.run_agent(ai)
+        self.assertEqual([p.name for p in paths], ["2026-22_newsletter-report.pdf", "2026-11-05_daily-brief.pdf"])
+        for p in paths:
+            self.assertEqual(p.read_bytes()[:5], b"%PDF-")
+            self.assertGreater(p.stat().st_size, 20_000)                            # charts are embedded
         self.assertEqual(self.store.issue_keys(), ["2026-22"])                       # duplicate upload skipped
-        self.assertEqual(self.store.db.execute("SELECT note FROM seen_docs WHERE doc_id=2").fetchone()[0],
-                         "duplicate upload")
-        daily = paths[1].read_text()
-        bi = paths[0].read_text()
-        self.assertIn("**SELL** Beispiel Corp", daily)                              # 9-month low after crash
-        self.assertIn("Kandidat AG", bi)                                            # new candidate
-        self.assertNotIn("Teuer AG", bi.split("## 5.")[1].split("## Portfolio")[0])  # KUV too high
-        self.assertIn("broke the 9-month low", daily)                              # live rule, not just the T flag
-        self.assertIn("**ADD** | 85", daily.replace(" (high)", ""))                 # held + newsletter K
-        self.assertIn("Saisonfaktor | ＋ ⚠ | －", daily)                             # season turned after the issue
+        daily = (self.cfg.reports_dir / "2026-11-05_daily-brief.md").read_text()
+        self.assertIn("Test headline", daily)
+        self.assertIn("broke the 9-month low", daily)                               # rule engine still runs
+        self.assertIn("⚠ overrides rule", daily)                                    # AI override is flagged
+        self.assertNotIn("INVENTED", daily)                                         # unknown key dropped
+        bi = (self.cfg.reports_dir / "2026-22_newsletter-report.md").read_text()
+        self.assertIn("Kandidat AG", bi)
+        # issue request carried the newsletter PDF; daily did not; fallbacks + structured output requested
+        issue_req, daily_req = ai.requests
+        self.assertEqual(issue_req["messages"][0]["content"][0]["type"], "document")
+        self.assertEqual(daily_req["messages"][0]["content"][0]["type"], "text")
+        self.assertEqual(issue_req["fallbacks"], "default")
+        self.assertEqual(issue_req["output_config"]["format"]["type"], "json_schema")
+        self.assertEqual(issue_req["output_config"]["effort"], "high")
+        self.assertEqual(daily_req["output_config"]["effort"], "medium")
+        # memory: the daily run saw the issue run's notes
+        self.assertIn('"previous_ai_notes": "watch BSP"', daily_req["messages"][0]["content"][-1]["text"])
+        stored = self.store.last_analysis()
+        self.assertEqual(stored["position_calls"][0]["confidence"] <= 100, True)     # clamped
         self.assertEqual(len(self.pl.uploaded), 2)
-        self.assertTrue(all(name.endswith(".txt") for name, _ in self.pl.uploaded))
+        self.assertTrue(all(name.endswith(".pdf") for name, _ in self.pl.uploaded))
+
+    def test_without_credentials_reports_fall_back_to_rules(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            paths = self.run_agent(ai=None)
+        daily = (self.cfg.reports_dir / "2026-11-05_daily-brief.md").read_text()
+        self.assertIn("Unavailable: no Anthropic credentials", daily)
+        self.assertTrue(all(p.read_bytes()[:5] == b"%PDF-" for p in paths))
 
     def test_second_run_same_day_does_not_reingest(self):
-        with mock.patch.dict(marketdata.RATE_SOURCES, rates()), \
-             mock.patch.object(agent_mod, "parse_pdf", return_value=issue()):
-            Agent(self.cfg, self.store, self.market, self.pl, datetime(2026, 11, 5, 18)).run()
-            paths = Agent(self.cfg, self.store, self.market, self.pl, datetime(2026, 11, 5, 19)).run()
-        self.assertEqual([p.name for p in paths], ["2026-11-05_daily-brief.md"])
+        self.run_agent(FakeAI())
+        paths = self.run_agent(FakeAI(), hour=19)
+        self.assertEqual([p.name for p in paths], ["2026-11-05_daily-brief.pdf"])
 
 
 if __name__ == "__main__":

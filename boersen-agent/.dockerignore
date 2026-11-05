@@ -1,0 +1,7 @@
+data/
+reports/
+tests/
+*.db
+config.toml
+portfolio.csv
+__pycache__/

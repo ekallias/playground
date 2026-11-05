@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-DISCLAIMER = ("_Rule-based signals derived from the Börsensignale methods (see docs/METHODS.md). "
-              "Confidence = how strongly the rules agree, not a probability of gain. "
+DISCLAIMER = ("_Rule results from the Börsensignale methods (docs/METHODS.md); calls from the AI analyst "
+              "reading those facts. Confidence = strength of evidence, not a probability of gain. "
               "Not investment advice; you decide and trade yourself._")
 
 SIGN = {1: "＋", -1: "－", None: "?"}
@@ -125,9 +125,43 @@ def tracks_section(ms, depot) -> list[str]:
     return out + [""]
 
 
-def daily(ctx, cfg, now: datetime) -> str:
+def dispo_changes(old_rows: list[dict], new_rows: list[dict]) -> list[str]:
+    old = {d["isin"]: d for d in old_rows}
+    new = {d["isin"]: d for d in new_rows}
+    added = [f"new: {d['name']} ({d['rec']})" for k, d in new.items() if k not in old]
+    recs = [f"{d['name']}: {old[k]['rec']} → {d['rec']}" for k, d in new.items()
+            if k in old and old[k]["rec"] != d["rec"]]
+    removed = [f"removed: {d['name']}" for k, d in old.items() if k not in new]
+    stops = [f"{d['name']}: stop {_fmt(old[k]['stop_9m'])} → {_fmt(d['stop_9m'])}" for k, d in new.items()
+             if k in old and old[k]["rec"] == d["rec"] and (old[k]["stop_9m"] or 0) != (d["stop_9m"] or 0)]
+    return added + recs + removed + stops
+
+
+def ai_section(analysis, err) -> list[str]:
+    if analysis is None:
+        return ["## AI analyst", "", f"_Unavailable: {err}. Rule results only._", ""]
+    d = analysis.data
+    mv = d["market_view"]
+    out = ["## AI analyst", "", f"**{d['headline']}**", "", d["summary"], "",
+           f"Market view: {mv['stance']} (confidence {mv['confidence']}) — {mv['reasoning']}", ""]
+    for section, title in (("position_calls", "Your positions"), ("newsletter_picks", "Newsletter picks"),
+                           ("new_ideas", "New ideas")):
+        if d.get(section):
+            out += [f"### {title}", "", "| Security | AI call | Rules | Rationale |", "|---|---|---|---|"]
+            for c in d[section]:
+                flag = " ⚠ overrides rule" if c.get("overrides_stated_rule") else ""
+                out.append(f"| {c['key']} | **{c['action']}** {c['confidence']}{flag} | "
+                           f"{c.get('rule_action')} {c.get('rule_confidence')} | {c['rationale']} |")
+            out.append("")
+    for key, title in (("risks", "Risks"), ("questions_for_user", "Questions for you")):
+        if d.get(key):
+            out += [f"### {title}", ""] + [f"- {x}" for x in d[key]] + [""]
+    return out
+
+
+def daily(ctx, cfg, now: datetime, analysis=None, err=None) -> str:
     ms, iss = ctx.market, ctx.issue
-    lines = [f"# Daily brief — {now:%Y-%m-%d %H:%M}", "", DISCLAIMER, ""]
+    lines = [f"# Daily brief — {now:%Y-%m-%d %H:%M}", "", DISCLAIMER, ""] + ai_section(analysis, err)
     if iss:
         lines.append(f"Newsletter basis: issue {iss['issue_key']} of {iss['issue_date']}. "
                      f"Prices: {cfg.provider} (usually delayed ~15 min).")
@@ -161,13 +195,13 @@ def daily(ctx, cfg, now: datetime) -> str:
     return "\n".join(lines)
 
 
-def biweekly(ctx, prev_issue, prev_dispo, cfg, now: datetime) -> str:
+def biweekly(ctx, prev_issue, prev_dispo, cfg, now: datetime, analysis=None, err=None) -> str:
     import json
     iss, dash, ms = ctx.issue, ctx.dashboard or {}, ctx.market
     depot = json.loads(iss["depot"]) if iss.get("depot") else {}
     warnings = json.loads(iss["warnings"]) if iss.get("warnings") else []
     lines = [f"# Newsletter report — Börsensignale {iss['issue_key']} ({iss['issue_date']})", "",
-             f"Generated {now:%Y-%m-%d %H:%M}. {DISCLAIMER}", ""]
+             f"Generated {now:%Y-%m-%d %H:%M}. {DISCLAIMER}", ""] + ai_section(analysis, err)
     # 1. what the newsletter says
     g = dash.get("gesamt", {})
     lines += ["## 1. What the issue says", "",
@@ -192,13 +226,7 @@ def biweekly(ctx, prev_issue, prev_dispo, cfg, now: datetime) -> str:
     if prev_issue:
         old = {d["isin"]: d for d in prev_dispo}
         new = {d["isin"]: d for d in ctx.issue_rows["dispo"]}
-        added = [f"- new: {d['name']} ({d['rec']})" for k, d in new.items() if k not in old]
-        recs = [f"- {d['name']}: {old[k]['rec']} → **{d['rec']}**" for k, d in new.items()
-                if k in old and old[k]["rec"] != d["rec"]]
-        removed = [f"- removed: {d['name']}" for k, d in old.items() if k not in new]
-        stops = [f"- {d['name']}: stop {_fmt(old[k]['stop_9m'])} → {_fmt(d['stop_9m'])}" for k, d in new.items()
-                 if k in old and old[k]["rec"] == d["rec"] and (old[k]["stop_9m"] or 0) != (d["stop_9m"] or 0)]
-        ch = added + recs + removed + (["", "Stop-level changes:"] + stops if stops else [])
+        ch = ["- " + c for c in dispo_changes(prev_dispo, ctx.issue_rows["dispo"])]
         lines += ch or ["- no changes in the Dispo-Liste"]
     else:
         lines.append("- first ingested issue")

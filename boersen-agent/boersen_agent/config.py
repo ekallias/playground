@@ -60,6 +60,14 @@ class Config:
     history_years: int
     symbols: dict[str, str]
     rules: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_RULES))
+    ai_enabled: bool = True
+    ai_model: str = "claude-opus-5-5"
+    ai_effort_daily: str = "medium"
+    ai_effort_issue: str = "high"
+    ai_max_tokens: int = 32000
+    ai_base_url: str | None = None          # e.g. LiteLLM pass-through: http://litellm:4000/anthropic
+    ai_server_fallbacks: bool = True        # Anthropic server-side refusal fallback (turn off if a gateway rejects it)
+    keep_markdown: bool = True
 
     @property
     def db_path(self) -> Path:
@@ -95,6 +103,7 @@ def load(path: str | Path | None) -> Config:
         return q if q.is_absolute() else base / q
 
     token_env = mk.get("token_env", "EODHD_API_TOKEN")
+    ai = raw.get("ai", {})
     return Config(
         data_dir=rel(paths.get("data_dir", "data")),
         reports_dir=rel(paths.get("reports_dir", "reports")),
@@ -109,4 +118,12 @@ def load(path: str | Path | None) -> Config:
         history_years=int(mk.get("history_years", 3)),
         symbols=symbols,
         rules=rules,
+        ai_enabled=bool(ai.get("enabled", True)),
+        ai_model=ai.get("model", "claude-opus-5-5"),
+        ai_effort_daily=ai.get("effort_daily", "medium"),
+        ai_effort_issue=ai.get("effort_issue", "high"),
+        ai_max_tokens=int(ai.get("max_tokens", 32000)),
+        ai_base_url=ai.get("base_url") or None,
+        ai_server_fallbacks=bool(ai.get("server_fallbacks", True)),
+        keep_markdown=bool(paths.get("keep_markdown", True)),
     )

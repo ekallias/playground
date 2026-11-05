@@ -221,3 +221,21 @@ def compute_market(market, cfg, dashboard: dict | None, asof: datetime,
     comps["short_term"] = fallback("short_term", "Kurzfristige Trend-Methoden", "I", "uses their stock universe")
     return MarketState(asof.isoformat(timespec="minutes"), comps, gesamt, other5, safety, strict, season,
                        levels, provisional, notes)
+
+
+def zins_at_dates(market, cfg, dates: list[str]) -> dict[str, float | None]:
+    """Computed Zinsstruktur as it would have read on each date (data strictly before the date)."""
+    try:
+        us10, us1 = market.rate("FRED:DGS10"), market.rate("FRED:DGS1")
+        um, eur = market.rate("BBK:UMLAUFRENDITE"), market.rate("ECB:EURIBOR12M")
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for day in dates:
+        base, _ = R.weekly([x for x in us10 if x[0] < day])
+        vals = [((v - b) + (c - e)) / 2 for (ds, v), b, c, e in
+                zip(base, R.align_ffill(base, us1), R.align_ffill(base, um), R.align_ffill(base, eur))
+                if None not in (b, c, e)]
+        sm = R.sma(vals, cfg.rule("zins_smoothing_weeks"))
+        out[day] = sm[-1] if sm else None
+    return out

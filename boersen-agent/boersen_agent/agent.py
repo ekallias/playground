@@ -6,11 +6,13 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
-from . import report
+from . import charts, pdfreport, report
+from . import rules as R
+from .analyst import AnalystError, analyse, build_facts
 from .marketdata import DataError
 from .newsletter import Issue, issue_age_days, name_key, parse_pdf
 from .portfolio import holdings, valuation
-from .signals import compute_market
+from .signals import compute_market, zins_at_dates
 from .suggest import UniverseIndex, evaluate, held_weeks_since, live_metrics, sector_kuv
 
 LOOKUP_BUDGET = 25
@@ -29,8 +31,9 @@ class Context:
 
 
 class Agent:
-    def __init__(self, cfg, store, market, paperless=None, now: datetime | None = None):
+    def __init__(self, cfg, store, market, paperless=None, now: datetime | None = None, ai_client=None):
         self.cfg, self.store, self.market, self.paperless = cfg, store, market, paperless
+        self.ai_client = ai_client
         self.now = now or datetime.now()
         self.today = self.now.date()
         self._lookups = 0
@@ -191,42 +194,117 @@ class Agent:
             return h.symbol, True
         return self.symbol_for(h.isin, h.name)
 
-    # ------------------------------------------------------------------ outputs
-    def _write(self, name: str, text: str, title: str) -> Path:
-        self.cfg.reports_dir.mkdir(parents=True, exist_ok=True)
-        path = self.cfg.reports_dir / name
-        path.write_text(text, encoding="utf-8")
-        if self.cfg.upload_reports and self.paperless is not None:
-            txt = path.with_suffix(".txt")
-            txt.write_text(text, encoding="utf-8")
+    # ------------------------------------------------------------------ AI
+    def _analyse(self, ctx, scope: str, changes=None, pdf: Path | None = None):
+        if not self.cfg.ai_enabled:
+            return None, "disabled in config ([ai] enabled = false)"
+        prev = self.store.last_analysis(before=None)
+        facts = build_facts(ctx, scope, self.now, changes, prev)
+        effort = self.cfg.ai_effort_issue if scope == "issue" else self.cfg.ai_effort_daily
+        try:
+            a = analyse(facts, model=self.cfg.ai_model, effort=effort, pdf=pdf, client=self.ai_client,
+                        max_tokens=self.cfg.ai_max_tokens, base_url=self.cfg.ai_base_url,
+                        server_fallbacks=self.cfg.ai_server_fallbacks)
+        except AnalystError as e:
+            return None, str(e)
+        self.store.save_analysis(self.today.isoformat(), scope, a, self.now.isoformat(timespec="seconds"))
+        return a, None
+
+    # ------------------------------------------------------------------ charts
+    def _charts(self, ctx, name: str, issue_scope: bool) -> dict:
+        folder = self.cfg.reports_dir / ".charts"
+        folder.mkdir(parents=True, exist_ok=True)
+        out: dict = {}
+
+        def go(key, fn, *args):
             try:
-                self.paperless.upload_document(txt, title=title, tags=self.cfg.report_tags or None)
+                out[key] = fn(*args, folder / f"{name}_{key}.png")
+            except Exception as e:  # noqa: BLE001 - a broken chart must not stop the report
+                self.notes.append(f"chart {key} failed: {e}")
+
+        go("allocation", charts.allocation, ctx.portfolio["rows"])
+        held = [s for s in ctx.suggestions if s.in_portfolio and s.live]
+        try:
+            out["stop_distance"] = charts.stop_distance(
+                [{"name": s.name, "dist": s.live.get("dist_to_stop_pct"),
+                  "breach": s.live.get("stop_breach_confirmed")} for s in held],
+                folder / f"{name}_stop_distance.png", self.cfg.rule("near_stop_pct"))
+            panels = [{"name": s.name, "weekly": R.weekly(self.market.daily_with_quote(s.symbol), self.now)[0]}
+                      for s in held if s.symbol]
+            out["price_vs_stop"] = charts.price_vs_stop(panels, folder / f"{name}_price_vs_stop.png",
+                                                        self.cfg.rule("nine_month_weeks"))
+        except Exception as e:  # noqa: BLE001 - a broken chart must not stop the report
+            self.notes.append(f"position charts failed: {e}")
+        go("value_history", charts.value_history, self.store.snapshots())
+        if issue_scope:
+            hist = [dict(r) for r in self.store.db.execute("SELECT issue_date, dashboard FROM issues ORDER BY issue_date")]
+            go("gesamt_history", charts.gesamt_history,
+               [{"date": h["issue_date"], "score": json.loads(h["dashboard"]).get("gesamt", {}).get("score")} for h in hist])
+            comp = zins_at_dates(self.market, self.cfg, [h["issue_date"] for h in hist])
+            go("zins_history", charts.zins_history,
+               [(h["issue_date"], json.loads(h["dashboard"]).get("zinsstruktur_value"), comp.get(h["issue_date"])) for h in hist])
+            groups = {"newsletter buy (K)": [s.universe for s in ctx.suggestions if s.newsletter_rec == "K" and s.universe],
+                      "your holdings": [s.universe for s in ctx.suggestions if s.in_portfolio and s.universe],
+                      "new candidates": [s.universe for s in ctx.suggestions if s.newsletter_rec is None
+                                         and not s.in_portfolio and s.universe]}
+            go("rs_kuv", charts.rs_kuv, ctx.issue_rows["universe"], groups, self.cfg.rule("rs_top_n"),
+               self.cfg.rule("kuv_normal_max"))
+        return {k: v for k, v in out.items() if v}
+
+    # ------------------------------------------------------------------ outputs
+    def _publish(self, pdf: Path, title: str) -> None:
+        if self.cfg.upload_reports and self.paperless is not None:
+            try:
+                self.paperless.upload_document(pdf, title=title, tags=self.cfg.report_tags or None)
             except Exception as e:  # noqa: BLE001
                 self.notes.append(f"upload to Paperless failed: {e}")
-            finally:
-                txt.unlink(missing_ok=True)
-        return path
 
-    def biweekly(self, issue_key: str | None = None) -> Path:
+    def _issue_pdf_path(self, issue_key: str) -> Path | None:
+        r = self.store.db.execute("SELECT doc_id FROM issues WHERE issue_key=?", (issue_key,)).fetchone()
+        folder = self.cfg.data_dir / "newsletters"
+        if r and r[0]:
+            hits = sorted(folder.glob(f"*_{r[0]}.pdf"))
+            if hits:
+                return hits[0]
+        return None
+
+    def biweekly(self, issue_key: str | None = None, pdf: Path | None = None) -> Path:
         ctx = self.context(issue_key, with_candidates=True, newsletter_scope=True)
         if not ctx.issue:
             raise RuntimeError("no newsletter ingested yet")
+        key = ctx.issue["issue_key"]
         prev_issue = self.store.latest_issue(before=ctx.issue["issue_date"])
         prev_rows = self.store.rows("dispo", prev_issue["issue_key"]) if prev_issue else []
-        text = report.biweekly(ctx, prev_issue, prev_rows, self.cfg, self.now)
-        self.store.save_suggestions(self.today.isoformat(), "issue:" + ctx.issue["issue_key"],
-                                    [s.as_dict() for s in ctx.suggestions])
-        key = ctx.issue["issue_key"]
-        return self._write(f"{key}_newsletter-report.md", text, f"Börsen-Agent Bericht Ausgabe {key}")
+        changes = report.dispo_changes(prev_rows, ctx.issue_rows["dispo"]) if prev_issue else []
+        analysis, err = self._analyse(ctx, "issue", changes, pdf or self._issue_pdf_path(key))
+        figs = self._charts(ctx, key, True)
+        ctx.notes = list(dict.fromkeys(ctx.notes + self.notes))
+        self.store.save_suggestions(self.today.isoformat(), "issue:" + key, [s.as_dict() for s in ctx.suggestions])
+        self.cfg.reports_dir.mkdir(parents=True, exist_ok=True)
+        if self.cfg.keep_markdown:
+            (self.cfg.reports_dir / f"{key}_newsletter-report.md").write_text(
+                report.biweekly(ctx, prev_issue, prev_rows, self.cfg, self.now, analysis, err), encoding="utf-8")
+        out = pdfreport.issue(self.cfg.reports_dir / f"{key}_newsletter-report.pdf", ctx, analysis, err,
+                              figs, changes, self.now)
+        self._publish(out, f"Börsen-Agent Bericht Ausgabe {key}")
+        return out
 
     def daily(self) -> Path:
         ctx = self.context(with_candidates=False, newsletter_scope=False)
-        text = report.daily(ctx, self.cfg, self.now)
-        self.store.save_suggestions(self.today.isoformat(), "daily", [s.as_dict() for s in ctx.suggestions])
-        self.store.save_snapshot(self.today.isoformat(), ctx.portfolio["total_eur"],
+        day = self.today.isoformat()
+        self.store.save_snapshot(day, ctx.portfolio["total_eur"],
                                  {"rows": ctx.portfolio["rows"], "equity_share": ctx.portfolio["equity_share"]})
-        return self._write(f"{self.today.isoformat()}_daily-brief.md", text,
-                           f"Börsen-Agent Tagesbrief {self.today.isoformat()}")
+        analysis, err = self._analyse(ctx, "daily")
+        figs = self._charts(ctx, day, False)
+        ctx.notes = list(dict.fromkeys(ctx.notes + self.notes))
+        self.store.save_suggestions(day, "daily", [s.as_dict() for s in ctx.suggestions])
+        self.cfg.reports_dir.mkdir(parents=True, exist_ok=True)
+        if self.cfg.keep_markdown:
+            (self.cfg.reports_dir / f"{day}_daily-brief.md").write_text(
+                report.daily(ctx, self.cfg, self.now, analysis, err), encoding="utf-8")
+        out = pdfreport.daily(self.cfg.reports_dir / f"{day}_daily-brief.pdf", ctx, analysis, err, figs, self.now)
+        self._publish(out, f"Börsen-Agent Tagesbrief {day}")
+        return out
 
     def run(self) -> list[Path]:
         out = []

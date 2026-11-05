@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     asset TEXT NOT NULL DEFAULT 'stock'     -- stock | fund | bond | cash
 );
 CREATE TABLE IF NOT EXISTS snapshots (date TEXT PRIMARY KEY, total_eur REAL, detail TEXT);
+CREATE TABLE IF NOT EXISTS analyses (
+    run_date TEXT, scope TEXT, model TEXT, data TEXT, usage TEXT, created_at TEXT,
+    PRIMARY KEY (run_date, scope)
+);
 CREATE TABLE IF NOT EXISTS suggestions (
     run_date TEXT, scope TEXT, key TEXT, name TEXT, action TEXT, confidence INTEGER, detail TEXT,
     PRIMARY KEY (run_date, scope, key)
@@ -170,6 +174,23 @@ class Store:
         with self.db:
             self.db.execute("INSERT OR REPLACE INTO snapshots VALUES (?,?,?)",
                             (date, total_eur, json.dumps(detail, ensure_ascii=False)))
+
+    # ---------------------------------------------------------------- AI analyses
+    def save_analysis(self, run_date: str, scope: str, analysis, created_at: str) -> None:
+        with self.db:
+            self.db.execute("INSERT OR REPLACE INTO analyses VALUES (?,?,?,?,?,?)",
+                            (run_date, scope, analysis.model, json.dumps(analysis.data, ensure_ascii=False),
+                             json.dumps(analysis.usage), created_at))
+
+    def last_analysis(self, before: str | None = None) -> dict | None:
+        q, args = "SELECT data FROM analyses", ()
+        if before:
+            q, args = q + " WHERE run_date < ?", (before,)
+        r = self.db.execute(q + " ORDER BY run_date DESC, created_at DESC LIMIT 1", args).fetchone()
+        return json.loads(r[0]) if r else None
+
+    def snapshots(self) -> list[tuple[str, float]]:
+        return [(r[0], r[1]) for r in self.db.execute("SELECT date, total_eur FROM snapshots ORDER BY date")]
 
     # ---------------------------------------------------------------- suggestions
     def save_suggestions(self, run_date: str, scope: str, items: list[dict]) -> None:

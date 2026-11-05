@@ -1,0 +1,392 @@
+blueprint:
+  name: Sunrise Alarm (multi-bulb, phone-synced)
+  author: Temirlan
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  description: >
+    Simulates a sunrise that finishes exactly at your alarm time.
+
+
+    * Smooth exponential ramp built from many short transitions (robust on Zigbee).
+
+    * Three light groups that join in sequence: RGB ember, RGB dawn, dimmable daylight.
+
+    * Reads alarm times pushed by iOS Shortcuts into `input_datetime` helpers (two people supported,
+      earliest alarm wins) or runs at a fixed time.
+
+    * Aborts instantly when you turn on a chosen light/switch. Preview it by pressing **Run actions**
+      on the automation (uses the short preview duration).
+
+    * Do NOT pick any of the sunrise lights as abort entity.
+  input:
+    lights_section:
+      name: Lights
+      icon: mdi:lightbulb-group
+      collapsed: false
+      input:
+        ember_lights:
+          name: Ember lights (RGB / RGBWW, start first)
+          selector:
+            entity:
+              domain: light
+              multiple: true
+        dawn_lights:
+          name: Dawn lights (RGB / RGBWW, join later)
+          default: []
+          selector:
+            entity:
+              domain: light
+              multiple: true
+        daylight_lights:
+          name: Daylight lights (dimmable only, join last)
+          default: []
+          selector:
+            entity:
+              domain: light
+              multiple: true
+        dawn_start:
+          name: Dawn lights join at (% of sunrise)
+          default: 40
+          selector:
+            number: {min: 5, max: 90, unit_of_measurement: "%", mode: slider}
+        daylight_start:
+          name: Daylight lights join at (% of sunrise)
+          default: 75
+          selector:
+            number: {min: 5, max: 95, unit_of_measurement: "%", mode: slider}
+    schedule_section:
+      name: Schedule
+      icon: mdi:calendar-clock
+      collapsed: false
+      input:
+        duration:
+          name: Sunrise duration
+          description: Also the lead time before the alarm.
+          default: 20
+          selector:
+            number: {min: 2, max: 60, unit_of_measurement: min, mode: slider}
+        preview_minutes:
+          name: Preview duration
+          description: Used when you press "Run actions" manually.
+          default: 2
+          selector:
+            number: {min: 1, max: 10, unit_of_measurement: min, mode: slider}
+        weekdays:
+          name: Active days
+          default: [mon, tue, wed, thu, fri, sat, sun]
+          selector:
+            select:
+              multiple: true
+              mode: list
+              options:
+                - {value: mon, label: Monday}
+                - {value: tue, label: Tuesday}
+                - {value: wed, label: Wednesday}
+                - {value: thu, label: Thursday}
+                - {value: fri, label: Friday}
+                - {value: sat, label: Saturday}
+                - {value: sun, label: Sunday}
+        max_sun_elevation:
+          name: Skip when sun is already above (degrees)
+          description: 90 disables this. Try 8 to skip bright summer mornings.
+          default: 90
+          selector:
+            number: {min: -10, max: 90, unit_of_measurement: "°", mode: slider}
+    sources_section:
+      name: Alarm sources
+      icon: mdi:alarm
+      collapsed: true
+      input:
+        p1_alarm:
+          name: Person 1 alarm time helper
+          description: input_datetime (time only) filled by the iOS Shortcut.
+          default: ""
+          selector:
+            entity: {domain: input_datetime}
+        p1_armed:
+          name: Person 1 armed flag
+          description: input_boolean set by the Shortcut. Blank = always armed.
+          default: ""
+          selector:
+            entity: {domain: input_boolean}
+        p1_person:
+          name: Person 1 presence
+          description: Blank = ignore presence.
+          default: ""
+          selector:
+            entity: {domain: person}
+        p2_alarm:
+          name: Person 2 alarm time helper
+          default: ""
+          selector:
+            entity: {domain: input_datetime}
+        p2_armed:
+          name: Person 2 armed flag
+          default: ""
+          selector:
+            entity: {domain: input_boolean}
+        p2_person:
+          name: Person 2 presence
+          default: ""
+          selector:
+            entity: {domain: person}
+        fallback_enabled:
+          name: Also run at a fixed start time
+          default: false
+          selector:
+            boolean: {}
+        fallback_time:
+          name: Fixed start time
+          default: "06:30:00"
+          selector:
+            time: {}
+    look_section:
+      name: Look and feel
+      icon: mdi:palette
+      collapsed: true
+      input:
+        gamma:
+          name: Brightness curve
+          description: 1 = linear, higher = longer and dimmer start, faster finish.
+          default: 2.5
+          selector:
+            number: {min: 1, max: 4, step: 0.1, mode: slider}
+        switch_point:
+          name: Switch from RGB to white at (% of sunrise)
+          default: 55
+          selector:
+            number: {min: 20, max: 90, unit_of_measurement: "%", mode: slider}
+        kelvin_start:
+          name: White temperature when switching
+          default: 2200
+          selector:
+            number: {min: 1800, max: 3500, unit_of_measurement: K, step: 50, mode: slider}
+        kelvin_end:
+          name: White temperature at the end
+          default: 4000
+          selector:
+            number: {min: 2700, max: 6500, unit_of_measurement: K, step: 50, mode: slider}
+        step_seconds:
+          name: Seconds per step
+          description: Shorter = smoother but more Zigbee traffic.
+          default: 30
+          selector:
+            number: {min: 10, max: 90, unit_of_measurement: s, mode: slider}
+    ending_section:
+      name: Abort and ending
+      icon: mdi:stop-circle-outline
+      collapsed: true
+      input:
+        abort_entities:
+          name: Abort when any of these turn on
+          description: e.g. ceiling light or KNX wall switch. Not the sunrise lights.
+          selector:
+            entity:
+              multiple: true
+        abort_action:
+          name: On abort
+          default: "off"
+          selector:
+            select:
+              options:
+                - {value: "off", label: Turn sunrise lights off}
+                - {value: neutral, label: Set sunrise lights to neutral white 70%}
+                - {value: none, label: Leave them as they are}
+        auto_off_minutes:
+          name: Turn lights off this long after the sunrise ends (0 = never)
+          default: 0
+          selector:
+            number: {min: 0, max: 120, unit_of_measurement: min, mode: slider}
+
+mode: single
+max_exceeded: silent
+
+trigger_variables:
+  p1_t: !input p1_alarm
+  p1_a: !input p1_armed
+  p1_p: !input p1_person
+  p2_t: !input p2_alarm
+  p2_a: !input p2_armed
+  p2_p: !input p2_person
+  lead_min: !input duration
+  fb_on: !input fallback_enabled
+  fb_time: !input fallback_time
+
+triggers:
+  - trigger: template
+    id: p1
+    value_template: >-
+      {% if p1_t and (not p1_a or is_state(p1_a, 'on')) and (not p1_p or is_state(p1_p, 'home')) %}
+        {{ now().strftime('%H:%M') == (today_at(states(p1_t)) - timedelta(minutes=lead_min)).strftime('%H:%M') }}
+      {% else %}false{% endif %}
+  - trigger: template
+    id: p2
+    value_template: >-
+      {% if p2_t and (not p2_a or is_state(p2_a, 'on')) and (not p2_p or is_state(p2_p, 'home')) %}
+        {{ now().strftime('%H:%M') == (today_at(states(p2_t)) - timedelta(minutes=lead_min)).strftime('%H:%M') }}
+      {% else %}false{% endif %}
+  - trigger: template
+    id: fixed
+    value_template: "{{ fb_on and now().strftime('%H:%M') == fb_time[:5] }}"
+
+conditions:
+  - condition: time
+    weekday: !input weekdays
+  - condition: numeric_state
+    entity_id: sun.sun
+    attribute: elevation
+    below: !input max_sun_elevation
+
+variables:
+  is_preview: "{{ trigger.get('id') is none }}"
+  ember: !input ember_lights
+  dawn: !input dawn_lights
+  daylight: !input daylight_lights
+  dawn_pct: !input dawn_start
+  day_pct: !input daylight_start
+  dur_cfg: !input duration
+  prev_cfg: !input preview_minutes
+  step_cfg: !input step_seconds
+  gam: !input gamma
+  sw_pct: !input switch_point
+  k0: !input kelvin_start
+  k1: !input kelvin_end
+  abort_mode: !input abort_action
+  off_after: !input auto_off_minutes
+  armed_flags: !input p1_armed
+  armed_flags2: !input p2_armed
+  s_dawn: "{{ dawn_pct / 100 }}"
+  s_day: "{{ day_pct / 100 }}"
+  sw: "{{ sw_pct / 100 }}"
+  dur_min: "{{ prev_cfg if is_preview else dur_cfg }}"
+  step_target: "{{ 10 if is_preview else step_cfg }}"
+  steps: "{{ [((dur_min * 60) / step_target) | round(0, 'ceil') | int, 1] | max }}"
+  step_len: "{{ [((dur_min * 60) / steps) | round(0) | int, 1] | max }}"
+  groups: >-
+    {{ [
+      {'ids': ember, 'start': 0.0, 'rgb': true},
+      {'ids': dawn, 'start': s_dawn, 'rgb': true},
+      {'ids': daylight, 'start': s_day, 'rgb': false}
+    ] | selectattr('ids') | list }}
+  rgb_lights: "{{ ember + dawn }}"
+  all_lights: "{{ ember + dawn + daylight }}"
+  flags: "{{ [armed_flags, armed_flags2] | select | list }}"
+
+actions:
+  - alias: Disarm everyone so only the earliest alarm runs the sunrise
+    if:
+      - condition: template
+        value_template: "{{ flags | length > 0 and not is_preview }}"
+    then:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: "{{ flags }}"
+
+  - alias: Ramp
+    repeat:
+      count: "{{ steps }}"
+      sequence:
+        - variables:
+            P: "{{ repeat.index / steps }}"
+            P_prev: "{{ (repeat.index - 1) / steps }}"
+            use_rgb: "{{ P < sw }}"
+            col_rgb: "{{ [255, (20 + 110 * (P / sw)) | round(0) | int, 0] }}"
+            col_k: "{{ ((k0 + (k1 - k0) * ((P - sw) / (1 - sw))) | round(0) | int) if P >= sw else (k0 | int) }}"
+            color_dict: "{{ {'rgb_color': col_rgb} if use_rgb else {'color_temp_kelvin': col_k} }}"
+            ignite_count: >-
+              {{ groups | selectattr('start', 'ge', P_prev) | selectattr('start', 'lt', P) | list | length }}
+
+        - alias: Pre-ignite lights that join in this step (avoids a bright flash)
+          if:
+            - condition: template
+              value_template: "{{ ignite_count > 0 }}"
+          then:
+            - repeat:
+                for_each: "{{ groups }}"
+                sequence:
+                  - if:
+                      - condition: template
+                        value_template: "{{ P_prev <= repeat.item.start and P > repeat.item.start }}"
+                    then:
+                      - action: light.turn_on
+                        target:
+                          entity_id: "{{ repeat.item.ids }}"
+                        data: "{{ {'brightness_pct': 1} | combine(color_dict if repeat.item.rgb else {}) }}"
+            - delay: 2
+
+        - alias: Step every group towards its next level
+          repeat:
+            for_each: "{{ groups }}"
+            sequence:
+              - if:
+                  - condition: template
+                    value_template: "{{ P > repeat.item.start }}"
+                then:
+                  - variables:
+                      q: "{{ [(P - repeat.item.start) / (1 - repeat.item.start), 1] | min }}"
+                      bri: "{{ [1, ((100 * (q ** gam)) | round(0) | int)] | max }}"
+                  - action: light.turn_on
+                    target:
+                      entity_id: "{{ repeat.item.ids }}"
+                    data: "{{ {'brightness_pct': bri, 'transition': step_len} | combine(color_dict if repeat.item.rgb else {}) }}"
+
+        - alias: Wait one step, or abort
+          wait_for_trigger:
+            - trigger: state
+              entity_id: !input abort_entities
+              to: "on"
+          timeout: "{{ step_len }}"
+          continue_on_timeout: true
+
+        - alias: Handle abort
+          if:
+            - condition: template
+              value_template: "{{ wait.trigger is not none }}"
+          then:
+            - choose:
+                - conditions: "{{ abort_mode == 'off' }}"
+                  sequence:
+                    - action: light.turn_off
+                      target:
+                        entity_id: "{{ all_lights }}"
+                      data:
+                        transition: 1
+                - conditions: "{{ abort_mode == 'neutral' }}"
+                  sequence:
+                    - action: light.turn_on
+                      target:
+                        entity_id: "{{ rgb_lights }}"
+                      data:
+                        brightness_pct: 70
+                        color_temp_kelvin: 4000
+                        transition: 1
+                    - if:
+                        - condition: template
+                          value_template: "{{ daylight | length > 0 }}"
+                      then:
+                        - action: light.turn_on
+                          target:
+                            entity_id: "{{ daylight }}"
+                          data:
+                            brightness_pct: 70
+                            transition: 1
+            - stop: Sunrise aborted
+
+  - alias: Optional auto-off after the sunrise
+    if:
+      - condition: template
+        value_template: "{{ off_after > 0 }}"
+    then:
+      - wait_for_trigger:
+          - trigger: state
+            entity_id: !input abort_entities
+            to: "on"
+        timeout:
+          minutes: "{{ off_after }}"
+        continue_on_timeout: true
+      - action: light.turn_off
+        target:
+          entity_id: "{{ all_lights }}"
+        data:
+          transition: 3

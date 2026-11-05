@@ -1,0 +1,18 @@
+# Drop into /config/packages/ (needs `homeassistant: packages: !include_dir_named packages` in configuration.yaml)
+# Or create the same four helpers in the UI with the same entity IDs.
+input_datetime:
+  alarm_time_temirlan:
+    name: Alarm time Temirlan
+    has_date: false
+    has_time: true
+  alarm_time_husband:
+    name: Alarm time Husband
+    has_date: false
+    has_time: true
+input_boolean:
+  sunrise_armed_temirlan:
+    name: Sunrise armed Temirlan
+    icon: mdi:weather-sunset-up
+  sunrise_armed_husband:
+    name: Sunrise armed Husband
+    icon: mdi:weather-sunset-up

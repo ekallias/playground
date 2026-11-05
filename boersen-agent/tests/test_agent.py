@@ -240,3 +240,25 @@ class HandoffMode(AgentEndToEnd):
         ai = FakeAI()
         self.run_agent(ai)
         self.assertEqual(ai.requests, [])
+
+
+class GermanReports(AgentEndToEnd):
+    def test_german_pdfs_markdown_and_prompt(self):
+        import subprocess
+        from boersen_agent import i18n
+        self.cfg.report_language = "de"
+        ai = FakeAI()
+        try:
+            paths = self.run_agent(ai)
+        finally:
+            i18n.set_lang("en")
+        text = subprocess.run(["pdftotext", str(paths[1]), "-"], capture_output=True, text=True).stdout
+        for word in ("Tagesbrief", "Ihre Positionen", "VERKAUFEN", "Aktienquote", "Marktlage", "Seite 1"):
+            self.assertIn(word, text)
+        self.assertNotIn("Your positions", text)
+        issue_text = subprocess.run(["pdftotext", str(paths[0]), "-"], capture_output=True, text=True).stdout
+        self.assertIn("Empfehlungen der Ausgabe, geprüft", issue_text)
+        md = (self.cfg.reports_dir / "2026-11-05_daily-brief.md").read_text()
+        self.assertIn("## KI-Analyse", md)
+        self.assertIn("Wochenschluss unter dem 9-Monats-Tief", md)
+        self.assertIn("German (Deutsch)", ai.requests[0]["system"][0]["text"])

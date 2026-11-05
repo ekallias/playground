@@ -44,8 +44,7 @@ data, stay at 50 or below. Disagreement between sources should pull confidence d
 - Funds and ETFs only get the price rules; bonds and cash are cash-like and need no call.
 - Be concrete and brief: name the rule, the level, the number. The investor reads this on a phone \
 before deciding; one or two sentences per rationale is right.
-- Write in English. Keep German method names (Gesamtsystem, Sicherheitssystem, 9-Monats-Tief) as they \
-appear in the newsletter.
+{language_rule}
 - This is decision support for the investor's own account; they decide and trade themselves. Do not \
 add generic disclaimers - the report carries one.
 - Use `notes_for_next_run` for anything you want to remember next time (open questions, levels to \
@@ -104,6 +103,13 @@ SCHEMA = {
                  "risks", "questions_for_user", "notes_for_next_run"],
     "additionalProperties": False,
 }
+
+
+def system_prompt() -> str:
+    """Role + house rules (in the configured report language) + the methods document."""
+    from . import i18n
+    methods = METHODS_PATH.read_text(encoding="utf-8") if METHODS_PATH.exists() else ""
+    return SYSTEM_PROMPT.replace("{language_rule}", i18n.ai_language_rule()) + methods
 
 
 @dataclass
@@ -232,7 +238,7 @@ def analyse(facts: dict, *, model: str, effort: str, pdf: Path | None = None, cl
     """One structured Claude call. Raises AnalystError on refusal, truncation or API errors.
     Credentials: ANTHROPIC_API_KEY (a LiteLLM virtual key when going through a gateway);
     base URL: `base_url` or ANTHROPIC_BASE_URL."""
-    system = SYSTEM_PROMPT + (METHODS_PATH.read_text(encoding="utf-8") if METHODS_PATH.exists() else "")
+    system = system_prompt()
     content: list[dict] = []
     if pdf is not None and Path(pdf).exists():
         content.append({"type": "document", "title": f"Börsensignale {facts['newsletter']['issue']}",

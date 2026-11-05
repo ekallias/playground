@@ -48,6 +48,11 @@ Charts:
 
 A Markdown copy of each report is kept as well (`keep_markdown`).
 
+**Language:** set `[report] language = "de"` for German reports. That covers headings, tables, action
+labels (VERKAUFEN, HALTEN …), rule reasons, charts, dates and numbers (1.234,56), and the AI writes
+its text in German too. Internal codes stay English, so the history and the guardrails don't depend
+on the language.
+
 Duplicate uploads of the same issue are detected and skipped. Reports can also be uploaded to
 Paperless (`upload_reports = true`).
 

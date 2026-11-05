@@ -69,6 +69,7 @@ class Config:
     ai_base_url: str | None = None          # e.g. LiteLLM pass-through: http://litellm:4000/anthropic
     ai_server_fallbacks: bool = True        # Anthropic server-side refusal fallback (turn off if a gateway rejects it)
     keep_markdown: bool = True
+    report_language: str = "en"             # en | de: language of reports, charts and the AI's text
 
     @property
     def db_path(self) -> Path:
@@ -128,4 +129,5 @@ def load(path: str | Path | None) -> Config:
         ai_base_url=ai.get("base_url") or None,
         ai_server_fallbacks=bool(ai.get("server_fallbacks", True)),
         keep_markdown=bool(paths.get("keep_markdown", True)),
+        report_language=str(raw.get("report", {}).get("language", "en")),
     )

@@ -22,6 +22,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (HRFlowable, Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer,
                                 Table, TableStyle)
 
+from .i18n import _, action, date_long, date_short, num, reason
 from .names import nice_name
 
 _FONTS = os.path.join(matplotlib.get_data_path(), "fonts", "ttf")
@@ -77,11 +78,14 @@ def P(text, style="body"):
 
 
 def _fmt(v, nd=2, suffix=""):
-    return "–" if v is None else f"{v:,.{nd}f}{suffix}".replace(",", " ")
+    return num(v, nd, suffix)
 
 
 def h1(text):
     return [P(text, "h1"), HRFlowable(width="100%", thickness=1.2, color=NAVY_SUB, spaceBefore=1, spaceAfter=5)]
+
+
+_action = action
 
 
 def label(action: str | None, conf: int | None = None):
@@ -89,8 +93,8 @@ def label(action: str | None, conf: int | None = None):
     if not action:
         return P("–", "cell")
     tint, ink = ACTION_STYLE.get(action, ("#eef0f2", "#52514e"))
-    txt = f"<font color='{ink}'><b>{action}</b></font>" + (f" <font color='#52514e'>{conf}</font>" if conf is not None else "")
-    t = Table([[Paragraph(txt, S["cell"])]], colWidths=[17 * mm])
+    txt = f"<font color='{ink}'><b>{_action(action)}</b></font>" + (f" <font color='#52514e'>{conf}</font>" if conf is not None else "")
+    t = Table([[Paragraph(txt, S["cell"])]], colWidths=[22 * mm if _action(action) != action else 17 * mm])
     t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), H(tint)), ("LEFTPADDING", (0, 0), (-1, -1), 3),
                            ("RIGHTPADDING", (0, 0), (-1, -1), 2), ("TOPPADDING", (0, 0), (-1, -1), 1.5),
                            ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]))
@@ -176,7 +180,7 @@ def _footer(canvas, doc):
     canvas.setFont("DejaVu", 7)
     canvas.setFillColor(MUTED)
     canvas.drawString(15 * mm + 19 * mm, 8 * mm, doc.title.replace("Börsen-Agent ", "· "))
-    canvas.drawRightString(A4[0] - 15 * mm, 8 * mm, f"page {doc.page}")
+    canvas.drawRightString(A4[0] - 15 * mm, 8 * mm, f"{_('page')} {doc.page}")
     canvas.restoreState()
 
 
@@ -190,20 +194,20 @@ def _build(path: Path, title: str, story: list):
 # ------------------------------------------------------------------ shared sections
 def ai_block(analysis, ai_error) -> list:
     if analysis is None:
-        return [box(P(f"AI analysis unavailable: {ai_error or 'disabled in config'}. "
-                      "The tables show the rule engine's results only.", "warn"), OVERRIDE, CRIT)]
+        return [box(P(_("AI analysis unavailable: {err}. The tables show the rule engine's results only.")
+                      .format(err=ai_error or "disabled in config"), "warn"), OVERRIDE, CRIT)]
     d = analysis.data
     mv = d["market_view"]
     inner = [P(d["headline"], "lead"), P(d["summary"]), Spacer(1, 5),
-             P(f"<b>Market view:</b> {escape(STANCE.get(mv['stance'], mv['stance']))} "
-               f"(confidence {mv['confidence']}) — {escape(mv['reasoning'])}", "small")]
+             P(f"<b>{_('Market view:')}</b> {escape(_(STANCE.get(mv['stance'], mv['stance'])))} "
+               f"({_('confidence')} {mv['confidence']}) — {escape(mv['reasoning'])}", "small")]
     return [box(inner)]
 
 
 def calls_table(suggestions, calls: dict, include_rec=True) -> list:
-    head = ["Security", "AI call", "Rules", "Rationale"]
+    head = [_("Security"), _("AI call"), _("Rules"), _("Rationale")]
     if include_rec:
-        head.insert(3, "Newsletter")
+        head.insert(3, _("Newsletter"))
     rows, shade = [head], []
     order = {"SELL": 0, "REDUCE": 1, "WATCH": 2, "REVIEW": 3, "BUY": 4, "ADD": 5, "HOLD": 6}
 
@@ -216,62 +220,63 @@ def calls_table(suggestions, calls: dict, include_rec=True) -> list:
         if c:
             why = escape(c["rationale"])
             if c.get("overrides_9m_sell"):
-                why = (f"<font color='#d03b3b'><b>⚠ overrides the 9-month-low sell rule:</b></font> "
+                why = (f"<font color='#d03b3b'><b>{_('⚠ overrides the 9-month-low sell rule:')}</b></font> "
                        f"{escape(c.get('override_reason') or '')}<br/>" + why)
                 shade.append(len(rows))
             elif c.get("overrides_stated_rule"):
-                why = (f"<font color='#d03b3b'><b>⚠ differs from the rule:</b></font> "
+                why = (f"<font color='#d03b3b'><b>{_('⚠ differs from the rule:')}</b></font> "
                        f"{escape(c.get('override_reason') or '')}<br/>" + why)
                 shade.append(len(rows))
             ai = label(c["action"], c["confidence"])
         else:
-            ai, why = P("–", "cell"), escape(s.reasons[0]["text"] if s.reasons else "")
+            ai, why = P("–", "cell"), escape(reason(s.reasons[0]["text"]) if s.reasons else "")
         row = [Paragraph(f"<b>{escape(nice_name(s.name))}</b>", S["cell"]), ai, label(s.action, s.confidence),
                Paragraph(why, S["cell"])]
         if include_rec:
-            rec = {"K": "buy", "H": "hold", "V": "sell"}.get(s.newsletter_rec or "", "–")
+            rec = _({"K": "buy", "H": "hold", "V": "sell"}.get(s.newsletter_rec or "", "–"))
             verdict = (c or {}).get("verdict")
             vcol = {"confirmed": "#006300", "questionable": "#7a5600", "contradicted": "#a12b2b"}.get(verdict, "#898781")
-            check = f"AI {verdict}" if verdict else (s.verification or "")
+            check = _("AI {verdict}").format(verdict=_(verdict)) if verdict else _(s.verification or "")
             row.insert(3, Paragraph(f"{rec}<br/><font color='{vcol}'>{check}</font>", S["cell"]))
         rows.append(row)
-    widths = ([38 * mm, 20 * mm, 20 * mm, 20 * mm, W - 98 * mm] if include_rec
-              else [44 * mm, 20 * mm, 20 * mm, W - 84 * mm])
+    lw = 25 * mm if _action("REDUCE") != "REDUCE" else 20 * mm
+    widths = ([36 * mm, lw, lw, 21 * mm, W - 57 * mm - 2 * lw] if include_rec
+              else [42 * mm, lw, lw, W - 42 * mm - 2 * lw])
     return [table(rows, widths, shade=shade)]
 
 
 def market_table(ms, dash) -> list:
-    rows = [["Component", "Now", "Issue", "Source", "Rule", "Detail"]]
+    rows = [[_("Component"), _("Now"), _("Issue"), _("Source"), _("Rule"), _("Detail")]]
     for c in ms.components.values():
         now = f"<b>{SIGN[c.state]}</b>" + (" <font color='#d03b3b'>⚠</font>" if c.diverges else "")
-        rows.append([c.label, Paragraph(now, S["cell"]), SIGN[c.newsletter], c.source, c.marker, c.detail])
+        rows.append([_(c.label), Paragraph(now, S["cell"]), SIGN[c.newsletter], _(c.source), c.marker, reason(c.detail)])
     out = [table(rows, [34 * mm, 12 * mm, 18 * mm, 20 * mm, 10 * mm, W - 94 * mm])]
     if any(c.diverges for c in ms.components.values()):
-        out.append(P("⚠ = live data differs from the last issue (markets moved since, or the rule is inferred: I/U).", "small"))
+        out.append(P(_("⚠ = live data differs from the last issue (markets moved since, or the rule is inferred: I/U)."), "small"))
     for p in ms.provisional:
-        out.append(P("⏳ " + p, "small"))
+        out.append(P("⏳ " + reason(p), "small"))
     return out
 
 
 def portfolio_table(port) -> list:
-    rows = [["Position", "Type", "Qty", "Price", "Value €", "P/L"]]
+    rows = [[_("Position"), _("Type"), _("Qty"), _("Price"), _("Value €"), _("P/L")]]
     for r in port["rows"]:
         if r.get("cash"):
-            rows.append([nice_name(r["name"]), "cash", "–", "–", _fmt(r["value_eur"]), "–"])
+            rows.append([nice_name(r["name"]), _("cash"), "–", "–", _fmt(r["value_eur"]), "–"])
             continue
         q = r["quantity"]
         pnl = r["pnl_pct"]
         pnl_cell = Paragraph("–" if pnl is None else
                              f"<font color='{'#006300' if pnl >= 0 else '#a12b2b'}'>{_fmt(pnl, 1, '%')}</font>", S["cell"])
-        rows.append([nice_name(r["name"]), r["asset"], _fmt(q, 0 if q == int(q) else 2),
+        rows.append([nice_name(r["name"]), _(r["asset"]), _fmt(q, 0 if q == int(q) else 2),
                      f"{_fmt(r['price'])} {r['currency'] or ''}", _fmt(r["value_eur"]), pnl_cell])
     out = [table(rows, [64 * mm, 14 * mm, 20 * mm, 30 * mm, 26 * mm, W - 154 * mm])]
     notes = []
     if port["missing"]:
-        notes.append("No price for: " + ", ".join(nice_name(n) for n in port["missing"]))
+        notes.append(_("No price for: ") + ", ".join(nice_name(n) for n in port["missing"]))
     if port.get("at_cost"):
-        notes.append("Valued at cost: " + ", ".join(nice_name(n) for n in port["at_cost"]))
-    notes.append("Equity share counts stocks and funds; cash and bonds are cash-like, as in the newsletter.")
+        notes.append(_("Valued at cost: ") + ", ".join(nice_name(n) for n in port["at_cost"]))
+    notes.append(_("Equity share counts stocks and funds; cash and bonds are cash-like, as in the newsletter."))
     return out + [P(n, "small") for n in notes]
 
 
@@ -281,9 +286,9 @@ def lists_block(analysis) -> list:
     d, out = analysis.data, []
     cols = []
     if d["risks"]:
-        cols.append([P("Risks", "h2")] + [P("• " + r, "small") for r in d["risks"]])
+        cols.append([P(_("Risks"), "h2")] + [P("• " + r, "small") for r in d["risks"]])
     if d["questions_for_user"]:
-        cols.append([P("Questions for you", "h2")] + [P("• " + q, "small") for q in d["questions_for_user"]])
+        cols.append([P(_("Questions for you"), "h2")] + [P("• " + q, "small") for q in d["questions_for_user"]])
     if cols:
         t = Table([cols], colWidths=[W / len(cols)] * len(cols))
         t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
@@ -293,16 +298,16 @@ def lists_block(analysis) -> list:
 
 
 def appendix(suggestions, notes, analysis) -> list:
-    out = [PageBreak()] + h1("Appendix: rule details per security")
+    out = [PageBreak()] + h1(_("Appendix: rule details per security"))
     for s in suggestions:
-        lines = [f"<b>{escape(nice_name(s.name))}</b> — rules: {s.action} {s.confidence}"
-                 + (f" · symbol {escape(s.symbol)}" if s.symbol else "")]
+        lines = [f"<b>{escape(nice_name(s.name))}</b> — {_('rules:')} {_action(s.action)} {s.confidence}"
+                 + (f" · {_('symbol')} {escape(s.symbol)}" if s.symbol else "")]
         for r in s.reasons:
-            lines.append("&nbsp;&nbsp;• " + escape(r["text"]) + (f" [{r['marker']}]" if r["marker"] else "")
+            lines.append("&nbsp;&nbsp;• " + escape(reason(r["text"])) + (f" [{r['marker']}]" if r["marker"] else "")
                          + (f" ({r['pts']:+d})" if r["pts"] else ""))
         out.append(KeepTogether([P("<br/>".join(lines), "small"), Spacer(1, 4)]))
     if notes:
-        out += [P("Data notes", "h2")] + [P("• " + n, "small") for n in dict.fromkeys(notes)]
+        out += [P(_("Data notes"), "h2")] + [P("• " + reason(n), "small") for n in dict.fromkeys(notes)]
     if analysis is not None:
         u = analysis.usage
         out.append(P(f"AI: {escape(analysis.model)} · tokens in {u.get('input_tokens')} (cached {u.get('cache_read_input_tokens')}) "
@@ -316,20 +321,20 @@ def _regime_tiles(ms):
     gtxt = f"{g[0]}:{g[1]}" if g else "?"
     gcol = None if g is None else ("#0a7d0a" if g[0] > g[1] else "#c02f2f")
     safe = ms.safety_effective
-    stxt = {1: "positive", -1: "negative"}.get(safe, "unknown")
+    stxt = _({1: "positive", -1: "negative"}.get(safe, "unknown"))
     scol = {1: "#0a7d0a", -1: "#c02f2f"}.get(safe)
-    snote = "strict summer exit" if ms.safety_strict else ("2 of 3 warn → out" if safe == -1 else "S&P · DAX · yield curve")
-    return [("Gesamtsystem", gtxt, "positive" if g and g[0] > g[1] else "negative" if g else "", gcol),
+    snote = _("strict summer exit") if ms.safety_strict else _("2 of 3 warn → out" if safe == -1 else "S&P · DAX · yield curve")
+    return [("Gesamtsystem", gtxt, _("positive" if g and g[0] > g[1] else "negative") if g else "", gcol),
             ("Sicherheitssystem", stxt, snote, scol),
-            ("Season", "winter" if ms.season_positive else "summer",
-             "Nov–Apr: positive" if ms.season_positive else "May–Oct: caution", None)]
+            (_("Season"), _("winter" if ms.season_positive else "summer"),
+             _("Nov–Apr: positive" if ms.season_positive else "May–Oct: caution"), None)]
 
 
 def _chart_section(title, path, note=None):
     img = image(path)
     if not img:
         return []
-    parts = [P(title, "h2")] + ([P(note, "small"), Spacer(1, 2)] if note else []) + [img]
+    parts = [P(_(title), "h2")] + ([P(_(note), "small"), Spacer(1, 2)] if note else []) + [img]
     return [KeepTogether(parts)]
 
 
@@ -342,25 +347,26 @@ def daily(path: Path, ctx, analysis, ai_error, charts: dict, now) -> Path:
     total = port["total_eur"] if port["total_eur"] is not None else port["known_total_eur"]
     acts = [(calls.get(s.key) or {}).get("action", s.action) for s in mine]
     alerts = sum(a in ("SELL", "REDUCE", "WATCH") for a in acts)
-    story = [band("Daily brief", f"{now:%A, %d %B %Y · %H:%M}",
-                  (f"Börsensignale {iss['issue_key']}<br/>issue of {iss['issue_date']}" if iss else "no issue yet"))]
-    story += tiles([("Portfolio", f"{_fmt(total, 0)} €", "incomplete" if port["total_eur"] is None else "all positions priced", None),
-                    ("Equity share", _fmt(port["equity_share"], 0, "%"), "stocks + funds", None)]
+    story = [band(_("Daily brief"), date_long(now),
+                  (f"Börsensignale {iss['issue_key']}<br/>" + _("issue of {date}").format(date=date_short(iss['issue_date']))
+                   if iss else _("no issue yet")))]
+    story += tiles([(_("Portfolio"), f"{_fmt(total, 0)} €", _("incomplete" if port["total_eur"] is None else "all positions priced"), None),
+                    (_("Equity share"), _fmt(port["equity_share"], 0, "%"), _("stocks + funds"), None)]
                    + _regime_tiles(ctx.market)[:2]
-                   + [("Alerts", str(alerts), "sell / reduce / watch", "#c02f2f" if alerts else "#0a7d0a")])
+                   + [(_("Alerts"), str(alerts), _("sell / reduce / watch"), "#c02f2f" if alerts else "#0a7d0a")])
     story += ai_block(analysis, ai_error)
-    story += h1("Your positions") + (calls_table(mine, calls) if mine else [P("No portfolio imported yet.")])
+    story += h1(_("Your positions")) + (calls_table(mine, calls) if mine else [P(_("No portfolio imported yet."))])
     story += lists_block(analysis)
-    story += h1("Portfolio")
+    story += h1(_("Portfolio"))
     story += _chart_section("Allocation", charts.get("allocation")) + [Spacer(1, 4)] + portfolio_table(port)
     story += _chart_section("Portfolio value", charts.get("value_history"))
     story += _chart_section("Distance to the 9-month stop", charts.get("stop_distance"),
                             "The newsletter's latest exit point is a weekly close below the 9-month low.")
     story += _chart_section("Price vs. 9-month stop (completed weekly closes)", charts.get("price_vs_stop"))
-    story += [KeepTogether(h1("Market regime") + tiles(_regime_tiles(ctx.market)))] + market_table(ctx.market, ctx.dashboard)
-    story += [P(DISCLAIMER + " Prices typically delayed ~15 min.", "sub")]
+    story += [KeepTogether(h1(_("Market regime")) + tiles(_regime_tiles(ctx.market)))] + market_table(ctx.market, ctx.dashboard)
+    story += [P(_(DISCLAIMER) + " " + _("Prices typically delayed ~15 min."), "sub")]
     story += appendix(mine, ctx.notes, analysis)
-    return _build(path, f"Börsen-Agent daily brief {now:%Y-%m-%d}", story)
+    return _build(path, f"Börsen-Agent {_('daily brief')} {date_short(now.date())}", story)
 
 
 def issue(path: Path, ctx, analysis, ai_error, charts: dict, changes: list[str], now) -> Path:
@@ -375,46 +381,47 @@ def issue(path: Path, ctx, analysis, ai_error, charts: dict, changes: list[str],
         depot = json.loads(iss["depot"])
     recs = [d["rec"] for d in ctx.issue_rows["dispo"]]
     g = dash.get("gesamt", {}).get("score")
-    story = [band(f"Börsensignale {iss['issue_key']}", f"Newsletter report · issue of {iss['issue_date']}",
-                  f"generated<br/>{now:%d.%m.%Y %H:%M}")]
-    story += tiles([("Gesamtsystem", f"{g[0]}:{g[1]}" if g else "?", "positive" if g and g[0] > g[1] else "negative",
+    story = [band(f"Börsensignale {iss['issue_key']}",
+                  _("Newsletter report · issue of {date}").format(date=date_short(iss['issue_date'])),
+                  f"{_('generated')}<br/>{now:%d.%m.%Y %H:%M}")]
+    story += tiles([("Gesamtsystem", f"{g[0]}:{g[1]}" if g else "?", _("positive" if g and g[0] > g[1] else "negative"),
                      ("#0a7d0a" if g[0] > g[1] else "#c02f2f") if g else None),
-                    ("Model portfolio", f"{depot.get('stocks_pct', '?')}%", f"stocks · {depot.get('cash_pct', '?')}% cash", None),
-                    ("Buy", str(recs.count("K")), "K in the Dispo-Liste", "#0a7d0a"),
-                    ("Sell", str(recs.count("V")), "V in the Dispo-Liste", "#c02f2f" if recs.count("V") else None),
-                    ("New ideas", str(len(analysis.data["new_ideas"]) if analysis else len(cands)), "from the 700-stock list", None)])
+                    (_("Model portfolio"), f"{depot.get('stocks_pct', '?')}%", _("stocks · {cash}% cash").format(cash=depot.get('cash_pct', '?')), None),
+                    (_("Buy"), str(recs.count("K")), _("K in the Dispo-Liste"), "#0a7d0a"),
+                    (_("Sell"), str(recs.count("V")), _("V in the Dispo-Liste"), "#c02f2f" if recs.count("V") else None),
+                    (_("New ideas"), str(len(analysis.data["new_ideas"]) if analysis else len(cands)), _("from the 700-stock list"), None)])
     story += ai_block(analysis, ai_error)
-    story += h1("Your portfolio against this issue") + (calls_table(mine, calls) if mine else [P("No portfolio imported yet.")])
-    story += h1("Newsletter recommendations, checked")
-    story += [P("Newsletter = the issue's buy / hold / sell, with the AI analyst's verdict (confirmed · questionable · "
-                "contradicted), or the scripts' live check when there is no AI analysis.", "small"),
+    story += h1(_("Your portfolio against this issue")) + (calls_table(mine, calls) if mine else [P(_("No portfolio imported yet."))])
+    story += h1(_("Newsletter recommendations, checked"))
+    story += [P(_("Newsletter = the issue's buy / hold / sell, with the AI analyst's verdict (confirmed · questionable · "
+                  "contradicted), or the scripts' live check when there is no AI analysis."), "small"),
               Spacer(1, 3)]
-    story += calls_table(picks, calls) if picks else [P("All of this issue's recommendations are in your portfolio (see above).")]
+    story += calls_table(picks, calls) if picks else [P(_("All of this issue's recommendations are in your portfolio (see above)."))]
     if analysis and analysis.data["new_ideas"]:
         ideas = {c["key"]: c for c in analysis.data["new_ideas"]}
-        story += h1("New ideas from the 700-stock list") + calls_table([s for s in cands if s.key in ideas], ideas, include_rec=False)
+        story += h1(_("New ideas from the 700-stock list")) + calls_table([s for s in cands if s.key in ideas], ideas, include_rec=False)
     elif cands:
-        story += h1("New candidates from the 700-stock list")
-        story += [P("Top relative strength, a new 9-month high and a KUV in the normal range, not yet in the Dispo-Liste.", "small"),
+        story += h1(_("New candidates from the 700-stock list"))
+        story += [P(_("Top relative strength, a new 9-month high and a KUV in the normal range, not yet in the Dispo-Liste."), "small"),
                   Spacer(1, 3)] + calls_table(cands, {}, include_rec=False)
     story += lists_block(analysis)
-    story += h1("Changes since the previous issue")
-    ch = changes or ["first ingested issue"]
+    story += h1(_("Changes since the previous issue"))
+    ch = [reason(c) for c in changes] or [_("first ingested issue")]
     half = (len(ch) + 1) // 2
     cols = [[P("• " + c, "small") for c in ch[:half]], [P("• " + c, "small") for c in ch[half:]]]
     t = Table([cols], colWidths=[W / 2, W / 2])
     t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
     story.append(t)
-    story += h1("Charts")
+    story += h1(_("Charts"))
     story += _chart_section("Gesamtsystem per issue", charts.get("gesamt_history"))
     story += _chart_section("Zinsstruktur: printed in the newsletter vs. computed", charts.get("zins_history"),
                             "The rule only uses the sign (warning below 0); the computed series runs about 0.1 higher.")
     story += _chart_section("Stock list: relative strength vs. KUV", charts.get("rs_kuv"),
                             "Buy candidates sit right of the top-200 line and below the KUV line.")
     story += _chart_section("Your allocation", charts.get("allocation"))
-    story += [KeepTogether(h1("Market regime, re-checked with live data") + tiles(_regime_tiles(ctx.market)))] \
+    story += [KeepTogether(h1(_("Market regime, re-checked with live data")) + tiles(_regime_tiles(ctx.market)))] \
         + market_table(ctx.market, dash)
-    story += h1("Portfolio") + portfolio_table(ctx.portfolio)
-    story += [P(DISCLAIMER, "sub")]
+    story += h1(_("Portfolio")) + portfolio_table(ctx.portfolio)
+    story += [P(_(DISCLAIMER), "sub")]
     story += appendix(mine + picks + cands, ctx.notes, analysis)
-    return _build(path, f"Börsen-Agent issue report {iss['issue_key']}", story)
+    return _build(path, f"Börsen-Agent {_('issue report')} {iss['issue_key']}", story)

@@ -34,6 +34,8 @@ class Agent:
     def __init__(self, cfg, store, market, paperless=None, now: datetime | None = None, ai_client=None):
         self.cfg, self.store, self.market, self.paperless = cfg, store, market, paperless
         self.ai_client = ai_client
+        from . import i18n
+        i18n.set_lang(cfg.report_language)
         self.now = now or datetime.now()
         self.today = self.now.date()
         self._lookups = 0
@@ -319,13 +321,12 @@ class Agent:
     def prepare(self, out: Path, issue_key: str | None = None) -> dict:
         """Ingest new issues and write, per report, the fact pack, prompt and schema for an outside analyst
         (e.g. the Claude session that runs this command). Returns the task list."""
-        from .analyst import SCHEMA, METHODS_PATH, SYSTEM_PROMPT
+        from .analyst import SCHEMA, system_prompt
         out.mkdir(parents=True, exist_ok=True)
         for old in out.glob("*"):
             old.unlink()
         new = self.ingest() if self.paperless is not None else []
-        (out / "prompt.md").write_text(SYSTEM_PROMPT + (METHODS_PATH.read_text(encoding="utf-8")
-                                                        if METHODS_PATH.exists() else ""), encoding="utf-8")
+        (out / "prompt.md").write_text(system_prompt(), encoding="utf-8")
         (out / "schema.json").write_text(json.dumps(SCHEMA, indent=1), encoding="utf-8")
         prev = self.store.last_analysis()
         tasks = []

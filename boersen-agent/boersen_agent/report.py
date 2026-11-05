@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from .i18n import _, action, reason
+
 DISCLAIMER = ("_Rule results from the Börsensignale methods (docs/METHODS.md); calls from the AI analyst "
               "reading those facts. Confidence = strength of evidence, not a probability of gain. "
               "Not investment advice; you decide and trade yourself._")
@@ -22,7 +24,7 @@ def _score(t):
 
 
 def market_section(ms, dash) -> list[str]:
-    out = ["## Market regime", ""]
+    out = ["## " + _("Market regime"), ""]
     g = _score(ms.gesamt_score)
     gn = _score(tuple(dash["gesamt"]["score"])) if dash and dash.get("gesamt") else "?"
     safe = ms.safety_core
@@ -33,12 +35,12 @@ def market_section(ms, dash) -> list[str]:
         f"- **Sicherheitssystem:** {SIGN[safe.state]} {safe.detail}{strict}",
         f"- **Saisonfaktor:** {'positive (Nov–Apr)' if ms.season_positive else 'negative (May–Oct)'}",
         "",
-        "| Component | Now | Newsletter | Source | Rule | Detail |",
+        "| " + " | ".join(_(h) for h in ("Component", "Now", "Newsletter", "Source", "Rule", "Detail")) + " |",
         "|---|---|---|---|---|---|",
     ]
     for c in ms.components.values():
         flag = " ⚠" if c.diverges else ""
-        out.append(f"| {c.label} | {SIGN[c.state]}{flag} | {SIGN[c.newsletter]} | {c.source} | {c.marker} | {c.detail} |")
+        out.append(f"| {_(c.label)} | {SIGN[c.state]}{flag} | {SIGN[c.newsletter]} | {_(c.source)} | {c.marker} | {reason(c.detail)} |")
     lv = ms.levels
     lines = []
     for k, label in (("sp500_quarter_low", "S&P 500 quarter-rule warning below"),
@@ -67,14 +69,15 @@ def _live_cell(s):
 
 
 def suggestion_table(items, with_rec=True) -> list[str]:
-    head = "| Action | Conf. | Stock | Price | 9-month stop | Distance |" + (" Newsletter | Check |" if with_rec else "") + " Main reason |"
+    cols = ["Action", "Conf.", "Stock", "Price", "9-month stop", "Distance"] + (["Newsletter", "Check"] if with_rec else []) + ["Main reason"]
+    head = "| " + " | ".join(_(c) for c in cols) + " |"
     sep = "|---|---|---|---|---|---|" + ("---|---|" if with_rec else "") + "---|"
     out = [head, sep]
     for s in sorted(items, key=lambda s: (ACTION_ORDER.get(s.action, 9), -s.confidence)):
         price, stop, dist = _live_cell(s)
-        main = s.reasons[0]["text"] if s.reasons else ""
+        main = reason(s.reasons[0]["text"]) if s.reasons else ""
         extra = f" {s.newsletter_rec or '–'} | {s.verification or '–'} |" if with_rec else ""
-        out.append(f"| **{s.action}** | {s.confidence} ({s.label}) | {s.name} | {price} | {stop} | {dist} |{extra} {main} |")
+        out.append(f"| **{action(s.action)}** | {s.confidence} ({_(s.label)}) | {s.name} | {price} | {stop} | {dist} |{extra} {main} |")
     return out
 
 
@@ -85,7 +88,7 @@ def reasons_block(items) -> list[str]:
         for r in s.reasons:
             pts = f" ({r['pts']:+d})" if r["pts"] else ""
             mk = f" [{r['marker']}]" if r["marker"] else ""
-            out.append(f"- {r['text']}{mk}{pts}")
+            out.append(f"- {reason(r['text'])}{mk}{pts}")
         if s.symbol:
             out.append(f"- symbol: `{s.symbol}`")
         out.append("\n</details>")
@@ -93,7 +96,7 @@ def reasons_block(items) -> list[str]:
 
 
 def portfolio_section(port) -> list[str]:
-    out = ["## Portfolio", ""]
+    out = ["## " + _("Portfolio"), ""]
     if not port["rows"]:
         return out + ["No portfolio imported yet (`python -m boersen_agent portfolio import FILE.csv`).", ""]
     total = port["total_eur"] if port["total_eur"] is not None else port["known_total_eur"]
@@ -139,10 +142,10 @@ def dispo_changes(old_rows: list[dict], new_rows: list[dict]) -> list[str]:
 
 def ai_section(analysis, err) -> list[str]:
     if analysis is None:
-        return ["## AI analyst", "", f"_Unavailable: {err}. Rule results only._", ""]
+        return ["## " + _("AI analyst"), "", "_" + _("Unavailable: {err}. Rule results only.").format(err=err) + "_", ""]
     d = analysis.data
     mv = d["market_view"]
-    out = ["## AI analyst", "", f"**{d['headline']}**", "", d["summary"], "",
+    out = ["## " + _("AI analyst"), "", f"**{d['headline']}**", "", d["summary"], "",
            f"Market view: {mv['stance']} (confidence {mv['confidence']}) — {mv['reasoning']}", ""]
     for section, title in (("position_calls", "Your positions"), ("newsletter_picks", "Newsletter picks"),
                            ("new_ideas", "New ideas")):
@@ -150,7 +153,7 @@ def ai_section(analysis, err) -> list[str]:
             out += [f"### {title}", "", "| Security | AI call | Rules | Rationale |", "|---|---|---|---|"]
             for c in d[section]:
                 flag = " ⚠ overrides rule" if c.get("overrides_stated_rule") else ""
-                out.append(f"| {c['key']} | **{c['action']}** {c['confidence']}{flag} | "
+                out.append(f"| {c['key']} | **{action(c['action'])}** {c['confidence']}{flag} | "
                            f"{c.get('rule_action')} {c.get('rule_confidence')} | {c['rationale']} |")
             out.append("")
     for key, title in (("risks", "Risks"), ("questions_for_user", "Questions for you")):
@@ -175,16 +178,16 @@ def daily(ctx, cfg, now: datetime, analysis=None, err=None) -> str:
         p = ctx.previous.get(s.key)
         if p and p["action"] != s.action:
             changes.append(f"- {s.name}: {p['action']} → **{s.action}** ({s.confidence})")
-    lines += ["## Today", ""]
+    lines += ["## " + _("Today"), ""]
     if alerts:
-        lines += [f"- **{s.action}** {s.name} ({s.confidence}): {s.reasons[0]['text']}" for s in alerts]
+        lines += [f"- **{action(s.action)}** {s.name} ({s.confidence}): {reason(s.reasons[0]['text'])}" for s in alerts]
     else:
         lines.append("- No sell or watch signals on your positions.")
     if changes:
         lines += ["", "Changes since the last brief:"] + changes
     lines += [""] + portfolio_section(ctx.portfolio)
     if mine:
-        lines += ["## Position signals", ""] + suggestion_table(mine, with_rec=True) + [""] + reasons_block(mine) + [""]
+        lines += ["## " + _("Position signals"), ""] + suggestion_table(mine, with_rec=True) + [""] + reasons_block(mine) + [""]
     depot = None
     if iss and iss.get("depot"):
         import json

@@ -17,6 +17,7 @@ from matplotlib.patches import Patch  # noqa: E402
 from matplotlib.ticker import FuncFormatter  # noqa: E402
 
 from . import rules as R  # noqa: E402
+from .i18n import _, is_de, num  # noqa: E402
 from .names import nice_name  # noqa: E402
 
 SURFACE, INK, INK2, MUTED = "#fcfcfb", "#0b0b0b", "#52514e", "#898781"
@@ -44,13 +45,29 @@ def _axes(ax, grid_axis="y"):
 
 def _eur(v):
     a = abs(v)
+    k, m = ("Tsd.", "Mio.") if is_de() else ("k", "M")
+    sep = " " if is_de() else ""
     if a >= 1_000_000:
-        return f"{v / 1_000_000:,.2f}M"
+        return f"{num(v / 1_000_000, 2)}{sep}{m}"
     if a >= 10_000:
-        return f"{v / 1000:,.0f}k"
+        return f"{num(v / 1000, 0)}{sep}{k}"
     if a >= 1000:
-        return f"{v / 1000:,.1f}k"
-    return f"{v:,.0f}"
+        return f"{num(v / 1000, 1)}{sep}{k}"
+    return num(v, 0)
+
+
+_MON_DE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
+
+
+def _datefmt(pattern: str):
+    """Date tick formatter; German month abbreviations when the report language is German."""
+    if not is_de():
+        return mdates.DateFormatter(pattern)
+
+    def f(x, _p=None):
+        d = mdates.num2date(x)
+        return pattern.replace("%b", _MON_DE[d.month - 1]).replace("%y", f"{d:%y}").replace("%d", f"{d:%d}")
+    return FuncFormatter(f)
 
 
 def _save(fig, path: Path) -> Path:
@@ -72,7 +89,7 @@ def allocation(rows: list[dict], path: Path) -> Path | None:
     if not data:
         return None
     group = {"stock": 0, "fund": 1, "bond": 2, "cash": 2}
-    names = {0: "Stocks", 1: "Funds / ETFs", 2: "Cash-like (cash, bonds)"}
+    names = {0: _("Stocks"), 1: _("Funds / ETFs"), 2: _("Cash-like (cash, bonds)")}
     data.sort(key=lambda r: r["value_eur"])
     fig, ax = plt.subplots(figsize=(7.2, 0.32 * len(data) + 0.9))
     y = range(len(data))
@@ -83,7 +100,7 @@ def allocation(rows: list[dict], path: Path) -> Path | None:
     for i, r in enumerate(data):
         ax.text(r["value_eur"] + top * 0.01, i, _eur(r["value_eur"]) + " €", va="center", color=INK2, fontsize=7.5)
     ax.set_xlim(0, top * 1.15)
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: _eur(v)))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: _eur(v)))
     _axes(ax, "x")
     used = sorted({group.get(r.get("asset") or ("cash" if r.get("cash") else "stock"), 0) for r in data})
     ax.legend(handles=[Patch(facecolor=SERIES[g], label=names[g]) for g in used], loc="lower right", fontsize=7.5)
@@ -103,14 +120,15 @@ def stop_distance(items: list[dict], path: Path, near_pct: float) -> Path | None
         broke = d < 0 or i.get("breach")
         col = CRITICAL if broke else SERIOUS if d < near_pct else SERIES[0]
         ax.barh(k, d, height=0.68, color=col)
-        label = f"{d:+.1f}%" + ("  ✕ broke the 9-month low" if broke else "  ⚠ near stop" if d < near_pct else "")
+        label = ("+" if d >= 0 else "") + num(d, 1, "%") + (("  " + _("✕ broke the 9-month low")) if broke else
+                                                           ("  " + _("⚠ near stop")) if d < near_pct else "")
         ax.text(d + (0.6 if d >= 0 else -0.6), k, label, va="center", ha="left" if d >= 0 else "right",
                 color=INK2, fontsize=7.5)
     ax.axvline(near_pct, color=MUTED, linewidth=0.8, linestyle=(0, (3, 3)))
-    ax.text(near_pct, len(data) - 0.4, f" {near_pct:g}% watch line", color=MUTED, fontsize=7, va="bottom")
+    ax.text(near_pct, len(data) - 0.4, _(" {pct}% watch line").format(pct=num(near_pct, 0)), color=MUTED, fontsize=7, va="bottom")
     ax.axvline(0, color=AXIS, linewidth=0.8)
     ax.set_yticks(range(len(data)), [_short(i["name"]) for i in data], color=INK2)
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:.0f}%"))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: num(v, 0, "%")))
     lo = min(0, min(i["dist"] for i in data)) - 5
     ax.set_xlim(lo, max(i["dist"] for i in data) * 1.25 + 5)
     _axes(ax, "x")
@@ -134,11 +152,11 @@ def price_vs_stop(panels: list[dict], path: Path, weeks: int = 39) -> Path | Non
         ax.plot(dates, closes[start:], color=SERIES[0], linewidth=1.6)
         ax.step(dates, stop[start:], where="post", color=MUTED, linewidth=1.0, linestyle=(0, (3, 2)))
         if stop[-1] is not None:
-            ax.text(dates[-1], stop[-1], f" stop {stop[-1]:,.2f}", color=MUTED, fontsize=7, va="top")
-        ax.text(dates[-1], closes[-1], f" {closes[-1]:,.2f}", color=INK2, fontsize=7, va="bottom")
+            ax.text(dates[-1], stop[-1], _(" stop {v}").format(v=num(stop[-1], 2)), color=MUTED, fontsize=7, va="top")
+        ax.text(dates[-1], closes[-1], " " + num(closes[-1], 2), color=INK2, fontsize=7, va="bottom")
         ax.set_title(_short(p["name"], 26 if cols == 3 else 40), loc="left")
         ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 7] if cols == 3 else [1, 4, 7, 10]))
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+        ax.xaxis.set_major_formatter(_datefmt("%b %y"))
         ax.margins(x=0.12)
         _axes(ax)
     for ax in [a for r in axes for a in r][len(panels):]:
@@ -153,8 +171,8 @@ def value_history(snapshots: list[tuple[str, float]], path: Path) -> Path | None
     fig, ax = plt.subplots(figsize=(7.2, 2.2))
     ax.plot([p[0] for p in pts], [p[1] for p in pts], color=SERIES[0], linewidth=1.6)
     ax.text(pts[-1][0], pts[-1][1], f" {_eur(pts[-1][1])} €", color=INK2, fontsize=7.5, va="center")
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: _eur(v)))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: _eur(v)))
+    ax.xaxis.set_major_formatter(_datefmt("%d %b"))
     ax.margins(x=0.1)
     _axes(ax)
     return _save(fig, path)
@@ -175,10 +193,10 @@ def gesamt_history(issues: list[dict], path: Path) -> Path | None:
     ax.set_xticks(x, [R.d(i["date"]).strftime("%d.%m.") for i in data], rotation=90, fontsize=6.5)
     ax.set_yticks([0, 1, 2, 3])
     ax.set_ylim(0, 3.5)
-    ax.set_ylabel("positive votes")
+    ax.set_ylabel(_("positive votes"))
     ax.axhline(1.5, color=MUTED, linewidth=0.8, linestyle=(0, (3, 3)))
     ax.set_xlim(-0.6, len(data) + 1.6)
-    ax.text(len(data) - 0.3, 1.5, "positive\nabove", color=MUTED, fontsize=6.5, ha="left", va="center")
+    ax.text(len(data) - 0.3, 1.5, _("positive\nabove"), color=MUTED, fontsize=6.5, ha="left", va="center")
     _axes(ax)
     return _save(fig, path)
 
@@ -192,14 +210,15 @@ def zins_history(rows: list[tuple[str, float | None, float | None]], path: Path)
     fig, ax = plt.subplots(figsize=(7.2, 2.3))
     for pts, col, label in ((pub, SERIES[0], "newsletter"), (comp, SERIES[1], "computed")):
         if len(pts) >= 2:
-            ax.plot([p[0] for p in pts], [p[1] for p in pts], color=col, linewidth=1.6, label=label)
-            ax.text(pts[-1][0], pts[-1][1], f" {label} {pts[-1][1]:.2f}", color=INK2, fontsize=7, va="center")
+            ax.plot([p[0] for p in pts], [p[1] for p in pts], color=col, linewidth=1.6, label=_(label))
+            ax.text(pts[-1][0], pts[-1][1], " " + _(label + " {v}").format(v=num(pts[-1][1], 2)), color=INK2,
+                    fontsize=7, va="center")
     ax.axhline(0, color=CRITICAL, linewidth=0.8)
-    ax.text(1.0, 0.0, "warning below 0 ", color=CRITICAL, fontsize=6.5, va="bottom", ha="right",
+    ax.text(1.0, 0.0, _("warning below 0 "), color=CRITICAL, fontsize=6.5, va="bottom", ha="right",
             transform=ax.get_yaxis_transform())
     top = max([v for _, v in pub + comp] + [0.1])
     ax.set_ylim(min(0, min(v for _, v in pub + comp)) - 0.05, top * 1.45)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+    ax.xaxis.set_major_formatter(_datefmt("%b %y"))
     ax.margins(x=0.18)
     ax.legend(loc="upper left", fontsize=7, ncol=2)
     _axes(ax)
@@ -214,14 +233,14 @@ def rs_kuv(universe: list[dict], highlights: dict[str, list[dict]], top_n: int, 
         return None
     fig, ax = plt.subplots(figsize=(7.2, 4.0))
     ax.set_yscale("log")
-    ax.scatter([u["rs"] for u in pts], [u["kuv"] for u in pts], s=6, color=AXIS, linewidths=0, label="stock list")
+    ax.scatter([u["rs"] for u in pts], [u["kuv"] for u in pts], s=6, color=AXIS, linewidths=0, label=_("stock list"))
     labelled = []
     for (label, items), col in zip(highlights.items(), SERIES):
         it = [i for i in items if i.get("rs") and i.get("kuv")]
         if not it:
             continue
         ax.scatter([i["rs"] for i in it], [i["kuv"] for i in it], s=26, color=col, edgecolors=SURFACE,
-                   linewidths=0.8, label=label, zorder=3)
+                   linewidths=0.8, label=_(label), zorder=3)
         labelled += it[:12]
     # Greedy label placement: try four offsets, keep the first that does not overlap a placed label.
     fig.canvas.draw()
@@ -244,15 +263,15 @@ def rs_kuv(universe: list[dict], highlights: dict[str, list[dict]], top_n: int, 
     if len(ranked) >= top_n:
         cut = ranked[top_n - 1]
         ax.axvline(cut, color=MUTED, linewidth=0.8, linestyle=(0, (3, 3)))
-        ax.text(cut, 0.97, f" top {top_n} by RS →", color=MUTED, fontsize=6.5, va="top",
+        ax.text(cut, 0.97, _(" top {n} by RS →").format(n=top_n), color=MUTED, fontsize=6.5, va="top",
                 transform=ax.get_xaxis_transform())
     ax.axhline(kuv_max, color=MUTED, linewidth=0.8, linestyle=(0, (3, 3)))
-    ax.text(0.995, kuv_max, f"KUV {kuv_max:g} (normal ≤) ", color=MUTED, fontsize=6.5, va="bottom", ha="right",
+    ax.text(0.995, kuv_max, _("KUV {v} (normal ≤) ").format(v=num(kuv_max, 0)), color=MUTED, fontsize=6.5, va="bottom", ha="right",
             transform=ax.get_yaxis_transform())
     ax.set_yscale("log")
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
-    ax.set_xlabel("relative strength (price ÷ 15-month median × 100)")
-    ax.set_ylabel("KUV (price / sales, log)")
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:g}".replace(".", ",") if is_de() else f"{v:g}"))
+    ax.set_xlabel(_("relative strength (price ÷ 15-month median × 100)"))
+    ax.set_ylabel(_("KUV (price / sales, log)"))
     ax.legend(loc="upper right", fontsize=7)
     _axes(ax, "both")
     return _save(fig, path)
